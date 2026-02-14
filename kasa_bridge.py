@@ -2109,6 +2109,116 @@ async def api_room_cycle_post(request: Request, room_name: str, token: Optional[
         await log_event("room_cycle_error", request, {"room": room_name, "status": 500, "detail": str(e)})
         raise
 
+@app.get("/api/{room_name}/toggle")
+async def api_room_toggle_get(
+    request: Request,
+    room_name: str,
+    token: Optional[str] = None,
+    x_token: Optional[str] = Header(None, alias="X-Token"),
+):
+    """
+    Toggle a room on/off.
+    - If any device in the room is on: turn all off
+    - If all devices are off: restore last active scene (or first scene if none)
+    """
+    await log_event("room_toggle_trigger", request, {"room": room_name, "method": "GET", "has_token": bool(token or x_token)})
+    verify_trigger_token(token or x_token)
+    try:
+        return await _run_room_toggle(request, room_name)
+    except HTTPException as e:
+        await log_event("room_toggle_error", request, {"room": room_name, "status": e.status_code, "detail": e.detail})
+        raise
+    except Exception as e:
+        await log_event("room_toggle_error", request, {"room": room_name, "status": 500, "detail": str(e)})
+        raise
+
+@app.post("/api/{room_name}/toggle")
+async def api_room_toggle_post(request: Request, room_name: str, token: Optional[str] = Form(None)):
+    """Toggle a room on/off (POST version)."""
+    await log_event("room_toggle_trigger", request, {"room": room_name, "method": "POST", "has_token": bool(token)})
+    verify_trigger_token(token)
+    try:
+        return await _run_room_toggle(request, room_name)
+    except HTTPException as e:
+        await log_event("room_toggle_error", request, {"room": room_name, "status": e.status_code, "detail": e.detail})
+        raise
+    except Exception as e:
+        await log_event("room_toggle_error", request, {"room": room_name, "status": 500, "detail": str(e)})
+        raise
+
+async def _run_room_toggle(request: Request, room_name: str) -> dict:
+    """
+    Room-level on/off toggle.
+    - Check state of devices in the room (uses cache if available, else queries)
+    - If any on: turn all off and clear active_scene
+    - If all off: restore last active scene or first mapped scene
+    """
+    room_idx, room = _get_room_by_name(room_name)
+    mapped = _get_base_scenes_for_room(room_idx)
+    if not mapped:
+        raise HTTPException(status_code=409, detail="No scenes mapped to this room")
+
+    # Gather all unique devices from all scenes in this room
+    alias_to_cfg = {d.alias: d for d in config.devices}
+    room_device_aliases: set[str] = set()
+    for scene in mapped:
+        for action in scene.actions:
+            if action.device_alias in alias_to_cfg:
+                room_device_aliases.add(action.device_alias)
+
+    if not room_device_aliases:
+        raise HTTPException(status_code=409, detail="No devices found in room scenes")
+
+    # Check if any device is on (check cache first, then query)
+    now = time.time()
+    any_on = False
+
+    # First check the state cache
+    async with _device_state_cache_lock:
+        for alias in room_device_aliases:
+            dev_cfg = alias_to_cfg.get(alias)
+            if not dev_cfg:
+                continue
+            mac = normalize_mac(dev_cfg.mac)
+            cached = _device_state_cache.get(mac)
+            if cached and (now - cached["ts"]) < DEVICE_STATE_CACHE_TTL:
+                if cached["is_on"]:
+                    any_on = True
+                    break
+
+    # If no fresh cache, query one representative device
+    if not any_on:
+        # Use the first scene's representative device check
+        any_on = await is_scene_representative_on(mapped[0])
+
+    await log_event("room_toggle_state", request, {"room": room.name, "any_on": any_on})
+
+    if any_on:
+        # Turn all devices in the room OFF
+        off_actions = [SceneAction(device_alias=alias, action="off", params=None) for alias in room_device_aliases]
+        off_scene = Scene(
+            name=f"{room.name}_toggle:off",
+            actions=off_actions,
+            room_idx=room_idx,
+        )
+        res = await execute_scene(off_scene)
+        # Clear active scene for the room
+        room.active_scene = None
+        save_config(config)
+        await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=off_scene.name, res=res)
+        return {"status": "success", "action": "off", "room": room.name, "results": res.get("results", [])}
+    else:
+        # Turn ON: restore last active scene or use first mapped scene
+        restore_scene: Optional[Scene] = None
+        if room.active_scene:
+            restore_scene = next((s for s in mapped if s.name.lower() == room.active_scene.lower()), None)
+        if not restore_scene:
+            restore_scene = mapped[0]
+
+        res = await execute_scene(restore_scene)
+        await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=restore_scene.name, res=res)
+        return {"status": "success", "action": "on", "room": room.name, "scene": restore_scene.name, "results": res.get("results", [])}
+
 async def _run_room_cycle(request: Request, room_name: str) -> dict:
     """
     Cycle to the next scene for a room, with debouncing/queue collapse.
