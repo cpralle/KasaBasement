@@ -2230,6 +2230,12 @@ async def _run_room_cycle(request: Request, room_name: str) -> dict:
     if not mapped:
         raise HTTPException(status_code=409, detail="No scenes mapped to this room")
 
+    # Ignore cycle commands when lights are off (active_scene is None)
+    # This prevents accidental scene changes from button presses when room is dark
+    if room.active_scene is None:
+        await log_event("room_cycle_ignored", request, {"room": room.name, "reason": "lights_off"})
+        return {"status": "ignored", "room": room.name, "reason": "Lights are off - cycle ignored"}
+
     # Initialize per-room debounce state if needed
     if room_idx not in _room_cycle_state:
         _room_cycle_state[room_idx] = {"count": 0, "lock": asyncio.Lock(), "executing": False}
