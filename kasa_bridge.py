@@ -2169,12 +2169,13 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
     if not room_device_aliases:
         raise HTTPException(status_code=409, detail="No devices found in room scenes")
 
-    # Check if any device is on (check cache first, then query uncached devices)
+    # Check if room is on: use cache if fresh, otherwise trust active_scene
+    # This is fast - no device queries (those are slow over WiFi)
     now = time.time()
     any_on = False
-    devices_with_fresh_cache: set[str] = set()
+    found_fresh_cache = False
 
-    # First check the state cache for all room devices
+    # First check the state cache for any room device
     async with _device_state_cache_lock:
         for alias in room_device_aliases:
             dev_cfg = alias_to_cfg.get(alias)
@@ -2183,41 +2184,15 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
             mac = normalize_mac(dev_cfg.mac)
             cached = _device_state_cache.get(mac)
             if cached and (now - cached["ts"]) < DEVICE_STATE_CACHE_TTL:
-                devices_with_fresh_cache.add(alias)
+                found_fresh_cache = True
                 if cached["is_on"]:
                     any_on = True
-                    # Don't break - continue checking to build full cache picture
+                    break  # Found one on, that's enough
 
-    # If we found something on in cache, we're done
-    # If not, query devices that weren't in cache
-    if not any_on:
-        uncached_aliases = room_device_aliases - devices_with_fresh_cache
-        if uncached_aliases:
-            # Query actual device state for uncached devices
-            mac_to_device: dict[str, IotDevice] = {}
-
-            async def check_device(alias: str) -> bool:
-                dev_cfg = alias_to_cfg.get(alias)
-                if not dev_cfg:
-                    return False
-                try:
-                    device, _source = await resolve_device_for_config(dev_cfg, mac_to_device)
-                    if not device:
-                        return False
-                    return bool(read_device_is_on(device))
-                except Exception:
-                    return False
-
-            # Check uncached devices (with timeout to avoid blocking)
-            try:
-                results = await asyncio.wait_for(
-                    asyncio.gather(*[check_device(alias) for alias in uncached_aliases], return_exceptions=True),
-                    timeout=3.0
-                )
-                any_on = any(r is True for r in results)
-            except asyncio.TimeoutError:
-                # On timeout, assume off (better UX than hanging)
-                any_on = False
+    # If no fresh cache, trust active_scene (set by kasabasement when scenes run)
+    # active_scene is None when room was turned off, set when a scene runs
+    if not found_fresh_cache:
+        any_on = room.active_scene is not None
 
     await log_event("room_toggle_state", request, {"room": room.name, "any_on": any_on})
 
