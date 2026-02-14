@@ -70,7 +70,10 @@ class Room(BaseModel):
     cols: int = 8
     grid_map: Optional[List[Optional[SceneAction]]] = None
     # Remember last active *base* scene for this room (e.g. "Scene2", not "Scene2_d1")
+    # None means room is currently off
     active_scene: Optional[str] = None
+    # Remember the last scene that was ON (persists across off cycles for toggle restore)
+    last_on_scene: Optional[str] = None
     # Remember last dim level requested for this room via /api/<room>/dimming_d1..d4
     # Used so /api/<room>/cycle can respect the current dial position.
     active_dim: str = "d4"
@@ -627,6 +630,7 @@ async def execute_scene(scene: Scene) -> dict:
             if base_scene and base_scene.room_idx is not None:
                 if 0 <= base_scene.room_idx < len(config.rooms):
                     config.rooms[base_scene.room_idx].active_scene = base_scene.name
+                    config.rooms[base_scene.room_idx].last_on_scene = base_scene.name
                     save_config(config)
         except Exception:
             pass
@@ -1961,9 +1965,12 @@ async def api_trigger_scene_get(
                 room_idx=base_scene.room_idx,
                 dim_profile=base_scene.dim_profile,
             )
-            # Clear active scene for the room when toggling off
+            # Save and clear active scene for the room when toggling off
             if base_scene.room_idx is not None and 0 <= base_scene.room_idx < len(config.rooms):
-                config.rooms[base_scene.room_idx].active_scene = None
+                room = config.rooms[base_scene.room_idx]
+                if room.active_scene:
+                    room.last_on_scene = room.active_scene
+                room.active_scene = None
         else:
             # Off -> set scene (full scene brightness, i.e., base scene)
             run_scene = base_scene
@@ -2014,7 +2021,10 @@ async def api_trigger_scene_post(request: Request, scene_name: str, token: Optio
                 dim_profile=base_scene.dim_profile,
             )
             if base_scene.room_idx is not None and 0 <= base_scene.room_idx < len(config.rooms):
-                config.rooms[base_scene.room_idx].active_scene = None
+                room = config.rooms[base_scene.room_idx]
+                if room.active_scene:
+                    room.last_on_scene = room.active_scene
+                room.active_scene = None
         else:
             run_scene = base_scene
     else:
@@ -2205,14 +2215,20 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
             room_idx=room_idx,
         )
         res = await execute_scene(off_scene)
-        # Clear active scene for the room
+        # Remember current scene for later restore, then mark room as off
+        if room.active_scene:
+            room.last_on_scene = room.active_scene
         room.active_scene = None
         save_config(config)
         await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=off_scene.name, res=res)
         return {"status": "success", "action": "off", "room": room.name, "results": res.get("results", [])}
     else:
-        # Turn ON: always use first mapped scene (predictable behavior)
-        on_scene = mapped[0]
+        # Turn ON: restore last scene that was on (or fall back to first mapped scene)
+        on_scene = None
+        if room.last_on_scene:
+            on_scene = next((s for s in mapped if s.name.lower() == room.last_on_scene.lower()), None)
+        if not on_scene:
+            on_scene = mapped[0]
         res = await execute_scene(on_scene)
         await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=on_scene.name, res=res)
         return {"status": "success", "action": "on", "room": room.name, "scene": on_scene.name, "results": res.get("results", [])}
@@ -2285,8 +2301,9 @@ async def _run_room_cycle(request: Request, room_name: str) -> dict:
             else:
                 run_scene = chosen
 
-            # Update active_scene
+            # Update active_scene and last_on_scene
             room.active_scene = chosen.name
+            room.last_on_scene = chosen.name
             save_config(config)
 
             await log_event(
@@ -2419,6 +2436,7 @@ async def _run_room_dimming(request: Request, room_name: str, dim: str) -> dict:
     dimmed = derive_dimmed_scene(base_scene, suffix, mult)
     # Keep room active base scene as the base (not dim variant)
     room.active_scene = base_scene.name
+    room.last_on_scene = base_scene.name
     await log_event(
         "room_dimming_chosen",
         request,
