@@ -247,6 +247,12 @@ _device_cache_ttl = 30  # seconds - cache device connections for 30 seconds
 last_scene_run: Optional[dict] = None
 last_scene_run_lock = asyncio.Lock()
 
+# --- Room cycle debouncing (queue collapse) ---
+# When multiple cycle requests come in rapidly, we want to advance by the total count
+# but only execute the final scene (no intermediate flashing)
+CYCLE_DEBOUNCE_SECONDS = 0.15  # 150ms window to accumulate rapid presses
+_room_cycle_state: dict[int, dict] = {}  # room_idx -> {count, lock, pending_task}
+
 # --- Scene execution serialization ---
 # Multiple triggers can arrive back-to-back (dashboard click + room cycle + routines).
 # Without serialization, two scene runs can overlap and "fight", making it look like
@@ -1987,73 +1993,108 @@ async def api_room_cycle_post(request: Request, room_name: str, token: Optional[
         raise
 
 async def _run_room_cycle(request: Request, room_name: str) -> dict:
+    """
+    Cycle to the next scene for a room, with debouncing/queue collapse.
+
+    If multiple cycle requests arrive within CYCLE_DEBOUNCE_SECONDS, they are
+    collapsed: the scene advances by the total count, but only executes once.
+    This prevents intermediate scene flashing when a user rapidly presses a button.
+    """
     room_idx, room = _get_room_by_name(room_name)
     mapped = _get_base_scenes_for_room(room_idx)
     if not mapped:
         raise HTTPException(status_code=409, detail="No scenes mapped to this room")
 
-    # Acquire the scene execution lock BEFORE determining the next scene.
-    # This prevents race conditions where two rapid cycle requests both read the same
-    # active_scene and try to advance to the same next scene.
-    async with scene_execution_lock:
-        # Determine next scene based on room.active_scene (base scene name).
-        active_lower = (room.active_scene or "").strip().lower()
-        names = [s.name for s in mapped]
-        # Normalize names to avoid subtle whitespace/case mismatches causing cycling to "stick" on index 0.
-        idx_map = {s.name.strip().lower(): i for i, s in enumerate(mapped)}
+    # Initialize per-room debounce state if needed
+    if room_idx not in _room_cycle_state:
+        _room_cycle_state[room_idx] = {"count": 0, "lock": asyncio.Lock(), "executing": False}
 
-        if active_lower in idx_map:
-            next_idx = (idx_map[active_lower] + 1) % len(mapped)
-        else:
-            next_idx = 0
+    state = _room_cycle_state[room_idx]
 
-        chosen = mapped[next_idx]
-        # Respect the room's last dim level (dial position) when cycling.
-        # If active_dim is missing/invalid, default to full brightness (d4).
-        dim = (getattr(room, "active_dim", None) or "d4").strip().lower()
-        suffix = f"_{dim}"
-        if suffix in DIM_SUFFIXES and suffix != "_d4":
-            run_scene = derive_dimmed_scene(chosen, suffix, dim_multiplier(chosen, suffix))
-        else:
-            run_scene = chosen
+    async with state["lock"]:
+        state["count"] += 1
 
-        # Update active_scene immediately while we hold the lock
-        room.active_scene = chosen.name
-        save_config(config)
+        # If another request is already executing (in the debounce wait or scene execution),
+        # just increment count and return - that request will handle the accumulated count
+        if state["executing"]:
+            return {"status": "queued", "room": room.name, "accumulated_count": state["count"]}
 
-        await log_event(
-            "room_cycle_chosen",
-            request,
-            {
-                "room": room.name,
-                "room_idx": room_idx,
-                "active_scene": room.active_scene,
-                "active_dim": getattr(room, "active_dim", None),
-                "mapped_scenes": names,
-                "chosen_scene": chosen.name,
-                "run_scene": run_scene.name,
-            },
-        )
+        # We're the executor
+        state["executing"] = True
 
-    # Execute scene outside the lock to avoid holding it during slow device operations
-    res = await execute_scene(run_scene)
     try:
-        results = res.get("results") or []
-        ok = sum(1 for r in results if r.get("status") == "success")
-        err = sum(1 for r in results if r.get("status") == "error")
-        sample_errors = [
-            {"device": r.get("device"), "message": r.get("message")}
-            for r in results
-            if r.get("status") == "error"
-        ][:5]
-        await log_event(
-            "room_cycle_result",
-            request,
-            {"room": room.name, "scene": chosen.name, "device_success": ok, "device_error": err, "sample_errors": sample_errors},
-        )
-    except Exception:
-        pass
-    return res
+        # Wait for debounce period to accumulate rapid presses
+        await asyncio.sleep(CYCLE_DEBOUNCE_SECONDS)
+
+        # Get final accumulated count and reset
+        async with state["lock"]:
+            advance_count = state["count"]
+            state["count"] = 0
+
+        # Calculate scene after advancing by 'advance_count' steps
+        async with scene_execution_lock:
+            active_lower = (room.active_scene or "").strip().lower()
+            names = [s.name for s in mapped]
+            idx_map = {s.name.strip().lower(): i for i, s in enumerate(mapped)}
+
+            if active_lower in idx_map:
+                current_idx = idx_map[active_lower]
+            else:
+                current_idx = -1
+
+            # Advance by accumulated count (with wraparound)
+            next_idx = (current_idx + advance_count) % len(mapped)
+            chosen = mapped[next_idx]
+
+            # Respect the room's last dim level (dial position) when cycling
+            dim = (getattr(room, "active_dim", None) or "d4").strip().lower()
+            suffix = f"_{dim}"
+            if suffix in DIM_SUFFIXES and suffix != "_d4":
+                run_scene = derive_dimmed_scene(chosen, suffix, dim_multiplier(chosen, suffix))
+            else:
+                run_scene = chosen
+
+            # Update active_scene
+            room.active_scene = chosen.name
+            save_config(config)
+
+            await log_event(
+                "room_cycle_chosen",
+                request,
+                {
+                    "room": room.name,
+                    "room_idx": room_idx,
+                    "active_scene": room.active_scene,
+                    "active_dim": getattr(room, "active_dim", None),
+                    "mapped_scenes": names,
+                    "advance_count": advance_count,
+                    "chosen_scene": chosen.name,
+                    "run_scene": run_scene.name,
+                },
+            )
+
+        # Execute the final scene
+        res = await execute_scene(run_scene)
+        try:
+            results = res.get("results") or []
+            ok = sum(1 for r in results if r.get("status") == "success")
+            err = sum(1 for r in results if r.get("status") == "error")
+            sample_errors = [
+                {"device": r.get("device"), "message": r.get("message")}
+                for r in results
+                if r.get("status") == "error"
+            ][:5]
+            await log_event(
+                "room_cycle_result",
+                request,
+                {"room": room.name, "scene": chosen.name, "device_success": ok, "device_error": err, "sample_errors": sample_errors},
+            )
+        except Exception:
+            pass
+        return res
+    finally:
+        async with state["lock"]:
+            state["executing"] = False
 
 @app.get("/api/{room_name}/dimming_{dim}")
 async def api_room_dimming_get(
