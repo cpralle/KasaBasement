@@ -253,6 +253,14 @@ last_scene_run_lock = asyncio.Lock()
 CYCLE_DEBOUNCE_SECONDS = 0.15  # 150ms window to accumulate rapid presses
 _room_cycle_state: dict[int, dict] = {}  # room_idx -> {count, lock, pending_task}
 
+# --- Device state cache (for external state notifications) ---
+# Allows external systems (e.g., IFTTT) to notify us of state changes they made,
+# so toggle operations use correct state without querying slow devices.
+# Format: {mac_normalized: {"is_on": bool, "ts": float}}
+_device_state_cache: dict[str, dict] = {}
+_device_state_cache_lock = asyncio.Lock()
+DEVICE_STATE_CACHE_TTL = 60.0  # Trust notified state for 60 seconds
+
 # --- Scene execution serialization ---
 # Multiple triggers can arrive back-to-back (dashboard click + room cycle + routines).
 # Without serialization, two scene runs can overlap and "fight", making it look like
@@ -782,6 +790,22 @@ async def execute_scene(scene: Scene) -> dict:
                 ]
 
         save_config(config)
+
+        # Update device state cache based on scene actions (for accurate future toggles)
+        now = time.time()
+        async with _device_state_cache_lock:
+            alias_to_cfg = {d.alias: d for d in config.devices}
+            for action in scene.actions:
+                dev_cfg = alias_to_cfg.get(action.device_alias)
+                if not dev_cfg:
+                    continue
+                mac = normalize_mac(dev_cfg.mac)
+                if action.action == "on":
+                    _device_state_cache[mac] = {"is_on": True, "ts": now}
+                elif action.action == "off":
+                    _device_state_cache[mac] = {"is_on": False, "ts": now}
+                # "toggle" we don't know the final state, so don't update cache
+
         out = {"status": "success", "scene": scene.name, "results": results}
         # Broadcast event for map/dashboard syncing (multi-screen use)
         await publish_sse("scene_run", {"scene": scene.name, "results": results})
@@ -969,10 +993,28 @@ async def is_scene_representative_on(scene: Scene) -> bool:
     Fast heuristic for toggle: assume the scene's devices generally move together and
     check only ONE representative device (first configured action device we can resolve).
     This avoids N device updates on every button press.
+
+    If external state was recently notified via /api/notify/*, uses that cached state
+    instead of querying the device (much faster and avoids WiFi latency).
     """
     alias_to_cfg = {d.alias: d for d in config.devices}
-    mac_to_device: dict[str, IotDevice] = {}
+    now = time.time()
 
+    # First, check if we have recent notified state for any device in this scene
+    # If so, trust it (external system told us the state)
+    async with _device_state_cache_lock:
+        for a in scene.actions:
+            dev_cfg = alias_to_cfg.get(a.device_alias)
+            if not dev_cfg:
+                continue
+            mac = normalize_mac(dev_cfg.mac)
+            cached = _device_state_cache.get(mac)
+            if cached and (now - cached["ts"]) < DEVICE_STATE_CACHE_TTL:
+                # Found fresh cached state - trust it
+                return cached["is_on"]
+
+    # No fresh cached state - query device directly
+    mac_to_device: dict[str, IotDevice] = {}
     for a in scene.actions:
         dev_cfg = alias_to_cfg.get(a.device_alias)
         if not dev_cfg:
@@ -1808,6 +1850,81 @@ async def api_capture_scene_actions(request: Request):
 
     captured = await asyncio.gather(*[capture_one(d) for d in targets])
     return {"actions": captured}
+
+# --- External state notification webhooks ---
+# These allow external systems (IFTTT, other smart home hubs) to notify kasabasement
+# of state changes they made, keeping toggle operations accurate without device queries.
+
+@app.get("/api/notify/all-on")
+async def api_notify_all_on(
+    request: Request,
+    token: Optional[str] = None,
+    x_token: Optional[str] = Header(None, alias="X-Token"),
+):
+    """
+    Notify that all devices have been turned ON by an external system.
+    Call this from IFTTT or other automation after turning lights on.
+    """
+    await log_event("notify_all_on", request, {"method": "GET"})
+    verify_trigger_token(token or x_token)
+
+    now = time.time()
+    async with _device_state_cache_lock:
+        for dev in config.devices:
+            mac = normalize_mac(dev.mac)
+            _device_state_cache[mac] = {"is_on": True, "ts": now}
+
+    await publish_sse("state_notify", {"state": "all_on", "device_count": len(config.devices)})
+    return {"status": "success", "state": "all_on", "devices_updated": len(config.devices)}
+
+@app.get("/api/notify/all-off")
+async def api_notify_all_off(
+    request: Request,
+    token: Optional[str] = None,
+    x_token: Optional[str] = Header(None, alias="X-Token"),
+):
+    """
+    Notify that all devices have been turned OFF by an external system.
+    """
+    await log_event("notify_all_off", request, {"method": "GET"})
+    verify_trigger_token(token or x_token)
+
+    now = time.time()
+    async with _device_state_cache_lock:
+        for dev in config.devices:
+            mac = normalize_mac(dev.mac)
+            _device_state_cache[mac] = {"is_on": False, "ts": now}
+
+    await publish_sse("state_notify", {"state": "all_off", "device_count": len(config.devices)})
+    return {"status": "success", "state": "all_off", "devices_updated": len(config.devices)}
+
+@app.get("/api/notify/state")
+async def api_notify_state_get(
+    request: Request,
+    state: str,  # "on" or "off"
+    token: Optional[str] = None,
+    x_token: Optional[str] = Header(None, alias="X-Token"),
+):
+    """
+    Notify device state change. Query param: state=on or state=off
+    Example: /api/notify/state?state=on&token=xxx
+    """
+    await log_event("notify_state", request, {"state": state, "method": "GET"})
+    verify_trigger_token(token or x_token)
+
+    state_lower = state.strip().lower()
+    if state_lower not in ("on", "off"):
+        raise HTTPException(status_code=400, detail="state must be 'on' or 'off'")
+
+    is_on = state_lower == "on"
+    now = time.time()
+    async with _device_state_cache_lock:
+        for dev in config.devices:
+            mac = normalize_mac(dev.mac)
+            _device_state_cache[mac] = {"is_on": is_on, "ts": now}
+
+    await publish_sse("state_notify", {"state": state_lower, "device_count": len(config.devices)})
+    return {"status": "success", "state": state_lower, "devices_updated": len(config.devices)}
 
 @app.get("/api/trigger/scene/{scene_name}")
 async def api_trigger_scene_get(
