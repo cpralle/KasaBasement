@@ -40,6 +40,9 @@
         <div class="flex items-center justify-between mb-4">
             <h3 class="text-xl font-semibold">Recent Events</h3>
             <div class="flex gap-2">
+                <button onclick="copyEvents()" id="copyBtn" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm">
+                    Copy
+                </button>
                 <button onclick="clearEvents()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm">
                     Clear
                 </button>
@@ -75,6 +78,7 @@
             const resp = await fetch('/api/diagnostics/events');
             const data = await resp.json();
             const events = (data && data.events) ? data.events : [];
+            cachedEvents = events;
             const html = events.map(e => {
                 const details = e.details ? JSON.stringify(e.details) : '{}';
                 return `<div class="py-1 border-b border-slate-800">
@@ -132,6 +136,23 @@
     async function clearEvents() {
         await fetch('/api/diagnostics/clear', { method: 'POST' });
         await refreshEvents();
+    }
+
+    let cachedEvents = [];
+    async function copyEvents() {
+        const btn = document.getElementById('copyBtn');
+        try {
+            const text = cachedEvents.map(e => {
+                const details = e.details ? JSON.stringify(e.details) : '{}';
+                return `${e.ts || ''} ${e.type || ''} ${e.client || ''} ${e.path || ''}\n${details}`;
+            }).join('\n');
+            await navigator.clipboard.writeText(text);
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        } catch (e) {
+            btn.textContent = 'Failed';
+            setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        }
     }
 
     refreshEvents();
