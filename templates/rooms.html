@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Map - Rooms</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen">
+<nav class="bg-slate-800 p-4 shadow-lg mb-8">
+<div class="container mx-auto flex justify-between items-center">
+<h1 class="text-xl font-bold tracking-tight">Kasa Basement Bridge</h1>
+<div class="flex gap-4">
+<a href="/" class="text-slate-400 hover:text-white transition-colors">Dashboard</a>
+<a href="/scenes" class="text-slate-400 hover:text-white transition-colors">Scenes</a>
+</div>
+</div>
+</nav>
+
+<main class="container mx-auto px-4 max-w-5xl">
+    <div class="flex items-start justify-between gap-6 mb-6">
+        <div>
+            <h2 class="text-3xl font-bold">Map</h2>
+            <p class="text-slate-400 mt-1">Define rooms and their 8×8 maps. Scenes reference rooms.</p>
+        </div>
+    </div>
+
+    <section class="bg-slate-800 p-6 rounded-2xl border border-slate-700 mb-8">
+        <h3 class="text-xl font-semibold mb-4">Create Room</h3>
+        <form action="/map/create-room" method="post" class="flex gap-2">
+            <input name="name" required placeholder="Basement"
+                   class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 focus:outline-none focus:border-blue-500">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-lg transition-colors">
+                Create
+            </button>
+        </form>
+    </section>
+
+    <section class="mb-8">
+        <h3 class="text-xl font-semibold mb-4 text-slate-400">Rooms</h3>
+        {% if not rooms %}
+        <div class="bg-slate-800 rounded-xl p-6 text-slate-400">No rooms yet.</div>
+        {% else %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {% for room in rooms %}
+            <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="font-semibold text-lg truncate">{{ room.name }}</div>
+                        <div class="text-xs text-slate-500 font-mono mt-1">Room #{{ room.idx }}</div>
+                        <div class="text-xs text-slate-500 font-mono mt-1">{{ room.rows }}×{{ room.cols }}</div>
+                    </div>
+                    <form action="/map/delete-room/{{ room.idx }}" method="post">
+                        <button type="submit" onclick="return confirm('Delete room {{ room.name }}?')"
+                                class="bg-red-600 hover:bg-red-500 text-white font-bold py-1 px-3 rounded-lg transition-colors text-xs">
+                            Delete
+                        </button>
+                    </form>
+                </div>
+
+                <div class="mt-4 flex gap-2">
+                    <a href="/map/room?room={{ room.idx }}"
+                       class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm">
+                        Map
+                    </a>
+                </div>
+
+                <div class="mt-4 border-t border-slate-700 pt-4">
+                    <div class="text-sm text-slate-400 mb-2">Rename</div>
+                    <form action="/map/rename-room/{{ room.idx }}" method="post" class="flex gap-2">
+                        <input name="name" value="{{ room.name|e }}" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm">
+                        <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm">
+                            Save
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </section>
+</main>
+
+</body>
+</html>
+
+

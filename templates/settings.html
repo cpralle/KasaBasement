@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings - Kasa Bridge</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen">
+<nav class="bg-slate-800 p-4 shadow-lg mb-8">
+<div class="container mx-auto flex justify-between items-center">
+<h1 class="text-xl font-bold tracking-tight">Kasa Basement Bridge</h1>
+<div class="flex gap-4">
+<a href="/" class="text-slate-400 hover:text-white transition-colors">Dashboard</a>
+<a href="/diagnostics" class="text-slate-400 hover:text-white transition-colors">Diagnostics</a>
+</div>
+</div>
+</nav>
+
+<main class="container mx-auto px-4 max-w-4xl">
+    <h2 class="text-3xl font-bold mb-8">Settings</h2>
+
+    <!-- Device Discovery -->
+    <section class="bg-slate-800 p-6 rounded-2xl border border-slate-700 mb-8">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-semibold">Discover Devices</h3>
+            <button onclick="discoverDevices()" id="discoverBtn" 
+                class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-lg transition-colors">
+                Rescan Network
+            </button>
+        </div>
+        <div class="text-xs text-slate-400 mb-3">
+            {% if last_discovery_at %}
+            Last refresh: <span class="font-mono">{{ last_discovery_at }}</span>
+            {% else %}
+            Last refresh: <span class="font-mono">never</span>
+            {% endif %}
+            {% if last_discovery_error %}
+            <span class="text-red-300 ml-2">Error: {{ last_discovery_error }}</span>
+            {% endif %}
+        </div>
+        <div id="discoveryResults" class="mt-4 space-y-2">
+            <p class="text-sm text-slate-400 mb-2">Found devices (click to add to queue):</p>
+            <div id="discoveredDevicesList">
+                {% if discovered_devices %}
+                    {% for device in discovered_devices %}
+                    <div class="bg-slate-900 p-3 rounded-lg border border-slate-600 cursor-pointer hover:bg-slate-700 transition-colors mb-2"
+                         onclick="addToQueue('{{ device.alias|e }}', '{{ device.mac|e }}', '{{ device.type|e }}')">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <span class="font-medium">{{ device.alias }}</span>
+                                <span class="text-slate-500 text-sm ml-2">({{ device.type }})</span>
+                                <p class="text-xs font-mono text-slate-400 mt-1">MAC: {{ device.mac }}</p>
+                                <p class="text-xs font-mono text-slate-500">IP: {{ device.host }}</p>
+                            </div>
+                            <span class="text-green-400 text-sm">Click to queue →</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-slate-400 text-sm">No unconfigured devices found. Click "Rescan Network" to search for devices.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Discovery Debug -->
+        <div class="mt-6 bg-slate-900 border border-slate-700 rounded-lg p-3">
+            <div class="flex items-center justify-between">
+                <div class="text-sm font-semibold text-slate-200">Discovery Debug</div>
+                <button type="button" class="text-xs text-slate-400 hover:text-white" onclick="toggleDiscoveryDebug()">Toggle</button>
+            </div>
+            <div id="discoveryDebug" class="mt-2 text-xs font-mono text-slate-300 hidden">
+                {% if last_discovery_debug %}
+                <pre class="whitespace-pre-wrap">{{ last_discovery_debug | tojson }}</pre>
+                {% else %}
+                <div class="text-slate-500">No debug data yet. Click "Rescan Network".</div>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <!-- Batch Add Devices Queue -->
+    <section class="bg-slate-800 p-6 rounded-2xl border border-slate-700 mb-8" id="queueSection" style="display: none;">
+        <h3 class="text-xl font-semibold mb-4">Devices to Add</h3>
+        <div id="deviceQueue" class="space-y-2 mb-4"></div>
+        <form id="batchAddForm" action="/add-devices-batch" method="post">
+            <input type="hidden" name="devices" id="devicesJson">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-lg transition-colors">
+                Add All Devices
+            </button>
+        </form>
+    </section>
+
+    <!-- Add Device Form -->
+    <section class="bg-slate-800 p-6 rounded-2xl border border-slate-700 mb-8">
+        <h3 class="text-xl font-semibold mb-4">Add New Device Manually</h3>
+        <form action="/add-device" method="post" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Alias (Name)</label>
+                <input type="text" name="alias" required placeholder="Basement Light" 
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">MAC Address</label>
+                <input type="text" name="mac" required placeholder="AA:BB:CC:DD:EE:FF" 
+                    pattern="([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})|([0-9A-Fa-f]{12})"
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 focus:outline-none focus:border-blue-500">
+                <p class="text-xs text-slate-500 mt-1">Format: AA:BB:CC:DD:EE:FF or AABBCCDDEEFF</p>
+            </div>
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Type</label>
+                <select name="dev_type" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 focus:outline-none focus:border-blue-500">
+                    <option value="bulb">Bulb</option>
+                    <option value="plug">Plug</option>
+                    <option value="strip">Power Strip</option>
+                </select>
+            </div>
+            <div class="md:col-span-3">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-lg transition-colors">
+                    Add Device
+                </button>
+            </div>
+        </form>
+    </section>
+
+    <!-- Configured Devices List -->
+    <section class="mb-8">
+        <h3 class="text-xl font-semibold mb-4 text-slate-400">Configured Devices</h3>
+        {% if error == "duplicate" %}
+        <div class="bg-yellow-900/50 border border-yellow-700 text-yellow-200 p-3 rounded-lg mb-4">
+            <p class="text-sm">Device already exists. Cannot add duplicate devices.</p>
+        </div>
+        {% endif %}
+        <div class="space-y-2">
+            {% for device in sorted_devices %}
+            <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700 flex justify-between items-center">
+                <div>
+                    <span class="font-bold text-blue-400">{{ device.alias }}</span>
+                    <span class="text-slate-500 text-sm ml-2">({{ device.type }})</span>
+                    <p class="text-xs font-mono text-slate-400">MAC: {{ device.mac }}</p>
+                    {% if device.host %}
+                    <p class="text-xs font-mono text-slate-500">IP: {{ device.host }}</p>
+                    {% endif %}
+                </div>
+                <div class="ml-4 flex gap-2">
+                    <button type="button" onclick="testDevice('{{ loop.index0 }}','toggle')"
+                        class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm">
+                        Test Toggle
+                    </button>
+                    <form action="/delete-device/{{ loop.index0 }}" method="post">
+                        <button type="submit" onclick="return confirm('Delete device {{ device.alias }}?')"
+                            class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm">
+                            Delete
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <!-- Diagnostics -->
+    <section class="bg-slate-800 p-6 rounded-2xl border border-slate-700 mb-8">
+        <h3 class="text-xl font-semibold mb-4">Diagnostics</h3>
+        <p class="text-sm text-slate-400 mb-4">Use this to verify local control works (no scenes needed).</p>
+        <div id="diagStatus" class="hidden bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm"></div>
+    </section>
+
+    <!-- Integrations (Flic Hub) -->
+    <section class="bg-slate-800 p-6 rounded-2xl border border-slate-700 mb-8">
+        <h3 class="text-xl font-semibold mb-4">Integrations (Flic Hub)</h3>
+        <p class="text-sm text-slate-400 mb-3">
+            Configure your Flic Hub button to make an HTTP request to run a scene.
+        </p>
+        <div class="bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm font-mono text-slate-200 space-y-2">
+            <div>GET {{ request.base_url }}api/trigger/scene/&lt;Scene%20Name&gt;</div>
+            <div>GET {{ request.base_url }}api/trigger/scene-index/&lt;index&gt;</div>
+            <div class="text-slate-400">
+                Optional security: set env var <span class="text-slate-200">SCENE_TRIGGER_TOKEN</span> and call:
+            </div>
+            <div>GET {{ request.base_url }}api/trigger/scene/&lt;Scene%20Name&gt;?token=&lt;your_token&gt;</div>
+            <div class="text-slate-400">or send header: <span class="text-slate-200">X-Token: &lt;your_token&gt;</span></div>
+        </div>
+    </section>
+</main>
+
+<script>
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text.replace(/[&<>"']/g, m => map[m]);
+    }
+    
+    async function discoverDevices() {
+        const btn = document.getElementById('discoverBtn');
+        const results = document.getElementById('discoveryResults');
+        const list = document.getElementById('discoveredDevicesList');
+        
+        btn.disabled = true;
+        btn.textContent = 'Scanning...';
+        
+        try {
+            // First refresh discovery + update configured device IPs (handles DHCP/network changes)
+            await fetch('/api/rescan', { method: 'POST' });
+            const response = await fetch('/api/discover');
+            const data = await response.json();
+
+            // Update debug panel
+            try {
+                const dbgResp = await fetch('/api/discovery-debug');
+                const dbg = await dbgResp.json();
+                const el = document.getElementById('discoveryDebug');
+                if (el) {
+                    el.innerHTML = `<pre class="whitespace-pre-wrap">${escapeHtml(JSON.stringify(dbg, null, 2))}</pre>`;
+                }
+            } catch (e) {
+                // ignore
+            }
+            
+            if (data.devices && data.devices.length > 0) {
+                const configuredDevices = [
+                    {% for device in sorted_devices %}
+                    { mac: "{{ device.mac }}" }{% if not loop.last %},{% endif %}
+                    {% endfor %}
+                ];
+                
+                list.innerHTML = data.devices.map(device => {
+                    const isConfigured = configuredDevices.find(d => d.mac.toLowerCase() === device.mac.toLowerCase());
+                    return `
+                    <div class="bg-slate-900 p-3 rounded-lg border ${isConfigured ? 'border-yellow-600 opacity-60' : 'border-slate-600'} ${isConfigured ? '' : 'cursor-pointer hover:bg-slate-700'} transition-colors mb-2"
+                         ${isConfigured ? '' : `onclick="addToQueue('${escapeHtml(device.alias)}', '${escapeHtml(device.mac)}', '${escapeHtml(device.type)}')"`}>
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <span class="font-medium">${escapeHtml(device.alias)}</span>
+                                <span class="text-slate-500 text-sm ml-2">(${escapeHtml(device.type)})</span>
+                                <p class="text-xs font-mono text-slate-400 mt-1">MAC: ${escapeHtml(device.mac)}</p>
+                                <p class="text-xs font-mono text-slate-500">IP: ${escapeHtml(device.host)}</p>
+                            </div>
+                            ${isConfigured ? '<span class="text-yellow-400 text-sm">Already configured</span>' : '<span class="text-green-400 text-sm">Click to queue →</span>'}
+                        </div>
+                    </div>
+                `;
+                }).join('');
+            } else {
+                list.innerHTML = '<p class="text-slate-400 text-sm">No unconfigured devices found. Make sure your Kasa devices are on the same network.</p>';
+            }
+        } catch (err) {
+            console.error('Discovery failed:', err);
+            list.innerHTML = '<p class="text-red-400 text-sm">Error discovering devices. Check console for details.</p>';
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Rescan Network';
+        }
+    }
+
+    function toggleDiscoveryDebug() {
+        const el = document.getElementById('discoveryDebug');
+        if (!el) return;
+        el.classList.toggle('hidden');
+    }
+    
+    let deviceQueue = [];
+    
+    function addToQueue(alias, mac, type) {
+        // Check if already in queue
+        if (deviceQueue.find(d => d.mac === mac)) {
+            return;
+        }
+        
+        // Check if already configured
+        const configuredDevices = [
+            {% for device in sorted_devices %}
+            { mac: "{{ device.mac }}" }{% if not loop.last %},{% endif %}
+            {% endfor %}
+        ];
+        
+        if (configuredDevices.find(d => d.mac.toLowerCase() === mac.toLowerCase())) {
+            alert('This device is already configured. Please remove it first if you want to re-add it.');
+            return;
+        }
+        
+        deviceQueue.push({ alias, mac, type });
+        updateQueueDisplay();
+    }
+    
+    function removeFromQueue(mac) {
+        deviceQueue = deviceQueue.filter(d => d.mac !== mac);
+        updateQueueDisplay();
+    }
+    
+    function updateQueueDisplay() {
+        const queueSection = document.getElementById('queueSection');
+        const queueDiv = document.getElementById('deviceQueue');
+        const devicesJson = document.getElementById('devicesJson');
+        
+        if (deviceQueue.length === 0) {
+            queueSection.style.display = 'none';
+            return;
+        }
+        
+        queueSection.style.display = 'block';
+        queueDiv.innerHTML = deviceQueue.map(device => `
+            <div class="bg-slate-900 p-3 rounded-lg border border-slate-600 flex justify-between items-center">
+                <div>
+                    <span class="font-medium">${escapeHtml(device.alias)}</span>
+                    <span class="text-slate-500 text-sm ml-2">(${escapeHtml(device.type)})</span>
+                    <p class="text-xs font-mono text-slate-400 mt-1">MAC: ${escapeHtml(device.mac)}</p>
+                </div>
+                <div class="flex items-center gap-4">
+                    <select onchange="updateDeviceType('${escapeHtml(device.mac)}', this.value)" 
+                            class="bg-slate-800 border border-slate-700 rounded-lg p-1 text-sm">
+                        <option value="bulb" ${device.type === 'bulb' ? 'selected' : ''}>Bulb</option>
+                        <option value="plug" ${device.type === 'plug' ? 'selected' : ''}>Plug</option>
+                        <option value="strip" ${device.type === 'strip' ? 'selected' : ''}>Strip</option>
+                    </select>
+                    <button onclick="removeFromQueue('${escapeHtml(device.mac)}')" 
+                            class="text-red-400 hover:text-red-300 text-sm">Remove</button>
+                </div>
+            </div>
+        `).join('');
+        
+        devicesJson.value = JSON.stringify(deviceQueue);
+    }
+    
+    function updateDeviceType(mac, type) {
+        const device = deviceQueue.find(d => d.mac === mac);
+        if (device) {
+            device.type = type;
+            updateQueueDisplay();
+        }
+    }
+
+    async function testDevice(deviceIdx, action) {
+        const statusEl = document.getElementById('diagStatus');
+        statusEl.classList.remove('hidden');
+        statusEl.classList.remove('text-green-300', 'text-red-300', 'text-slate-200');
+        statusEl.classList.add('text-slate-200');
+        statusEl.textContent = `Testing device #${deviceIdx} (${action})...`;
+        try {
+            const form = new FormData();
+            form.append('action', action);
+            const resp = await fetch(`/api/test-device/${deviceIdx}`, { method: 'POST', body: form });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                statusEl.classList.add('text-red-300');
+                statusEl.textContent = `Test failed: ${(data && data.detail) ? data.detail : 'Unknown error'}`;
+                return;
+            }
+            statusEl.classList.add('text-green-300');
+            statusEl.textContent = `OK: ${data.device} (via ${data.source} ${data.host || ''})`;
+        } catch (e) {
+            statusEl.classList.add('text-red-300');
+            statusEl.textContent = `Test failed: ${e}`;
+        }
+    }
+    
+    // Auto-scan on page load if no devices are shown
+    window.addEventListener('DOMContentLoaded', function() {
+        const list = document.getElementById('discoveredDevicesList');
+        const hasDevices = list.querySelector('.bg-slate-900');
+        if (!hasDevices) {
+            discoverDevices();
+        }
+    });
+</script>
+
+</body>
+</html>

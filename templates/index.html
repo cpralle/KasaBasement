@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kasa Basement Control</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+.scene-card {
+transition: transform 0.2s, box-shadow 0.2s;
+}
+.scene-card:active {
+transform: scale(0.95);
+}
+</style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen">
+<nav class="bg-slate-800 p-4 shadow-lg mb-8">
+<div class="container mx-auto flex justify-between items-center">
+<h1 class="text-xl font-bold tracking-tight">Kasa Basement Bridge</h1>
+<div class="flex gap-4">
+<a href="/map" class="text-slate-400 hover:text-white transition-colors">
+Map
+</a>
+<a href="/scenes" class="text-slate-400 hover:text-white transition-colors">
+Scenes
+</a>
+<a href="/routines" class="text-slate-400 hover:text-white transition-colors">
+Routines
+</a>
+<a href="/diagnostics" class="text-slate-400 hover:text-white transition-colors">
+Diagnostics
+</a>
+<a href="/settings" class="text-slate-400 hover:text-white transition-colors">
+Settings
+</a>
+</div>
+</div>
+</nav>
+
+<main class="container mx-auto px-4">
+    <section class="mb-12">
+        <h2 class="text-2xl font-semibold mb-6 border-b border-slate-700 pb-2">Scenes</h2>
+        
+        {% if not visible_scenes %}
+        <div class="bg-slate-800 rounded-xl p-8 text-center text-slate-400">
+            <p>No scenes configured yet. Go to <a class="text-blue-400 hover:text-blue-300 underline" href="/scenes">Scenes</a> to create one.</p>
+        </div>
+        {% else %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {% for scene in visible_scenes %}
+            <button 
+                onclick="runSceneByName('{{ scene.name|e }}', this)"
+                class="scene-card bg-slate-800 hover:bg-slate-700 p-6 rounded-2xl shadow-md border border-slate-700 text-left"
+            >
+                <h3 class="text-lg font-bold mb-2">{{ scene.name }}</h3>
+                <p class="text-sm text-slate-400">
+                    {{ scene.actions|length }} action{{ 's' if scene.actions|length != 1 else '' }}
+                </p>
+                <p class="mt-3 text-xs text-slate-500 font-mono">
+                    Triggers: {{ scene.name }}_toggle · {{ scene.name }}_d1 · {{ scene.name }}_d2 · {{ scene.name }}_d3 · {{ scene.name }}_d4
+                </p>
+            </button>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </section>
+
+    <section>
+        <h2 class="text-2xl font-semibold mb-6 border-b border-slate-700 pb-2">Devices</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {% for device in sorted_devices %}
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-start space-x-3" data-device-alias="{{ device.alias|e }}" data-device-mac="{{ device.mac|e }}" data-device-type="{{ device.type|e }}">
+                <div class="mt-1 w-3 h-3 rounded-full bg-slate-600" data-status-dot></div>
+                <div class="min-w-0 flex-1">
+                    <p class="font-medium text-sm">{{ device.alias }}</p>
+                    <p class="text-xs text-slate-500 font-mono">{{ device.mac }}</p>
+                    {% if device.host %}
+                    <p class="text-xs text-slate-600 font-mono">{{ device.host }}</p>
+                    {% endif %}
+                    <div class="mt-2 text-xs text-slate-400 space-y-1">
+                        <div><span class="text-slate-500">Power:</span> <span data-status-power>—</span></div>
+                        <div><span class="text-slate-500">Brightness:</span> <span data-status-brightness>—</span></div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-slate-500">Color:</span>
+                            <div class="flex items-center gap-1">
+                                <div class="w-5 h-5 rounded border border-slate-600" title="Full brightness color" data-color-full></div>
+                                <div class="w-5 h-5 rounded border border-slate-600" title="Current brightness color" data-color-current></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-3 flex flex-col gap-2 text-xs">
+                        <div class="flex gap-2">
+                            <button class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded" onclick="setPower(this, 'on')">On</button>
+                            <button class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded" onclick="setPower(this, 'off')">Off</button>
+                            <button class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded" onclick="setPower(this, 'toggle')">Toggle</button>
+                            <span class="text-slate-500 self-center" data-control-msg></span>
+                        </div>
+
+                        <div class="flex items-center gap-2" data-bulb-controls>
+                            <label class="text-slate-500">Brightness</label>
+                            <input type="range" min="0" max="100" value="100" class="flex-1" data-brightness-range>
+                            <input type="number" min="0" max="100" value="100" class="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1" data-brightness-input>
+                        </div>
+
+                        <div class="flex items-center gap-2" data-bulb-controls>
+                            <label class="text-slate-500">Color</label>
+                            <input type="color" value="#ffffff" class="h-8 w-12 bg-slate-900 border border-slate-700 rounded" data-color-picker>
+                            <input type="text" value="#ffffff" class="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 font-mono" data-color-text>
+                            <button class="bg-blue-600 hover:bg-blue-500 px-2 py-1 rounded text-white" onclick="applyBulbSettings(this)">Apply</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+</main>
+
+<script>
+    function escapeHtml(text) {
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    function getCard(el) {
+        return el.closest('[data-device-mac]');
+    }
+
+    function setMsg(card, msg, tone='') {
+        const el = card.querySelector('[data-control-msg]');
+        if (!el) return;
+        el.textContent = msg;
+        el.className = 'text-slate-500 self-center';
+        if (tone === 'error') el.classList.add('text-red-300');
+        if (tone === 'ok') el.classList.add('text-green-300');
+    }
+
+    async function postDeviceSet(mac, payload) {
+        const resp = await fetch(`/api/device/${encodeURIComponent(mac)}/set`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+            throw new Error((data && data.detail) ? data.detail : `HTTP ${resp.status}`);
+        }
+        return data;
+    }
+
+    async function setPower(btn, power) {
+        const card = getCard(btn);
+        const mac = card.getAttribute('data-device-mac');
+        setMsg(card, 'Sending...');
+        try {
+            await postDeviceSet(mac, { power });
+            setMsg(card, 'OK', 'ok');
+            await refreshDeviceStatus(true);
+        } catch (e) {
+            setMsg(card, `Error: ${e.message}`, 'error');
+        } finally {
+            setTimeout(() => setMsg(card, ''), 2000);
+        }
+    }
+
+    function syncBrightnessInputs(card, value) {
+        const r = card.querySelector('[data-brightness-range]');
+        const n = card.querySelector('[data-brightness-input]');
+        if (r) r.value = value;
+        if (n) n.value = value;
+    }
+
+    function initDeviceControls() {
+        document.querySelectorAll('[data-device-mac]').forEach(card => {
+            const type = (card.getAttribute('data-device-type') || '').toLowerCase();
+            const bulbControls = card.querySelectorAll('[data-bulb-controls]');
+            bulbControls.forEach(el => {
+                if (type === 'bulb') el.classList.remove('hidden');
+                else el.classList.add('hidden');
+            });
+
+            const range = card.querySelector('[data-brightness-range]');
+            const input = card.querySelector('[data-brightness-input]');
+            if (range && input) {
+                const markEditing = () => {
+                    card.dataset.editing = '1';
+                    // clear any previous timer
+                    if (card._editTimer) window.clearTimeout(card._editTimer);
+                    // auto-clear after short idle, but only if nothing is focused
+                    card._editTimer = window.setTimeout(() => {
+                        const active = document.activeElement;
+                        if (active && card.contains(active)) return;
+                        delete card.dataset.editing;
+                    }, 3000);
+                };
+                const clearEditing = () => {
+                    // allow refresh to repopulate after blur/mouseup
+                    if (card._editTimer) window.clearTimeout(card._editTimer);
+                    card._editTimer = window.setTimeout(() => {
+                        const active = document.activeElement;
+                        if (active && card.contains(active)) return;
+                        delete card.dataset.editing;
+                    }, 500);
+                };
+                range.addEventListener('input', () => syncBrightnessInputs(card, range.value));
+                range.addEventListener('input', markEditing);
+                range.addEventListener('mousedown', markEditing);
+                range.addEventListener('touchstart', markEditing, { passive: true });
+                range.addEventListener('mouseup', clearEditing);
+                range.addEventListener('touchend', clearEditing);
+                range.addEventListener('blur', clearEditing);
+
+                input.addEventListener('input', () => syncBrightnessInputs(card, input.value));
+                input.addEventListener('input', markEditing);
+                input.addEventListener('focus', markEditing);
+                input.addEventListener('blur', clearEditing);
+            }
+
+            const cp = card.querySelector('[data-color-picker]');
+            const ct = card.querySelector('[data-color-text]');
+            if (cp && ct) {
+                const markEditing = () => {
+                    card.dataset.editing = '1';
+                    if (card._editTimer) window.clearTimeout(card._editTimer);
+                    card._editTimer = window.setTimeout(() => {
+                        const active = document.activeElement;
+                        if (active && card.contains(active)) return;
+                        delete card.dataset.editing;
+                    }, 3000);
+                };
+                const clearEditing = () => {
+                    if (card._editTimer) window.clearTimeout(card._editTimer);
+                    card._editTimer = window.setTimeout(() => {
+                        const active = document.activeElement;
+                        if (active && card.contains(active)) return;
+                        delete card.dataset.editing;
+                    }, 500);
+                };
+                cp.addEventListener('input', () => { ct.value = cp.value; });
+                cp.addEventListener('input', markEditing);
+                cp.addEventListener('focus', markEditing);
+                cp.addEventListener('blur', clearEditing);
+                ct.addEventListener('input', () => {
+                    if (/^#[0-9A-Fa-f]{6}$/.test(ct.value)) cp.value = ct.value;
+                });
+                ct.addEventListener('input', markEditing);
+                ct.addEventListener('focus', markEditing);
+                ct.addEventListener('blur', clearEditing);
+            }
+        });
+    }
+
+    async function applyBulbSettings(btn) {
+        const card = getCard(btn);
+        const mac = card.getAttribute('data-device-mac');
+        const brightness = parseInt(card.querySelector('[data-brightness-input]').value || '0', 10);
+        const color = card.querySelector('[data-color-text]').value || '#ffffff';
+        setMsg(card, 'Applying...');
+        try {
+            await postDeviceSet(mac, { power: 'on', brightness, color });
+            setMsg(card, 'OK', 'ok');
+            // allow refresh to resume after apply
+            delete card.dataset.editing;
+            await refreshDeviceStatus(true);
+        } catch (e) {
+            setMsg(card, `Error: ${e.message}`, 'error');
+        } finally {
+            setTimeout(() => setMsg(card, ''), 2000);
+        }
+    }
+
+    async function refreshDeviceStatus(force = false) {
+        try {
+            const resp = await fetch(force ? '/api/device-status?force=1' : '/api/device-status');
+            const data = await resp.json();
+            const devices = (data && data.devices) ? data.devices : [];
+            const byAlias = new Map(devices.map(d => [d.alias, d]));
+
+            document.querySelectorAll('[data-device-alias]').forEach(card => {
+                const alias = card.getAttribute('data-device-alias');
+                const st = byAlias.get(alias);
+                const dot = card.querySelector('[data-status-dot]');
+                const powerEl = card.querySelector('[data-status-power]');
+                const brightEl = card.querySelector('[data-status-brightness]');
+                const fullEl = card.querySelector('[data-color-full]');
+                const currEl = card.querySelector('[data-color-current]');
+                const type = (card.getAttribute('data-device-type') || '').toLowerCase();
+                const range = card.querySelector('[data-brightness-range]');
+                const input = card.querySelector('[data-brightness-input]');
+                const cp = card.querySelector('[data-color-picker]');
+                const ct = card.querySelector('[data-color-text]');
+
+                if (!st || !st.reachable) {
+                    dot.className = 'mt-1 w-3 h-3 rounded-full bg-slate-600';
+                    powerEl.textContent = 'offline';
+                    brightEl.textContent = '—';
+                    fullEl.style.backgroundColor = '#000000';
+                    currEl.style.backgroundColor = '#000000';
+                    fullEl.style.opacity = '0.2';
+                    currEl.style.opacity = '0.2';
+                    return;
+                }
+
+                const isOn = st.is_on === true;
+                dot.className = `mt-1 w-3 h-3 rounded-full ${isOn ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-slate-500'}`;
+                powerEl.textContent = isOn ? 'on' : (st.is_on === false ? 'off' : 'unknown');
+
+                if (typeof st.brightness === 'number') {
+                    brightEl.textContent = `${st.brightness}%`;
+                } else {
+                    brightEl.textContent = '—';
+                }
+
+                const full = st.color_full || '#000000';
+                const curr = st.color_current || '#000000';
+                fullEl.style.backgroundColor = full;
+                currEl.style.backgroundColor = curr;
+                fullEl.style.opacity = '1';
+                currEl.style.opacity = '1';
+
+                // Pre-fill controls for bulbs
+                if (type === 'bulb') {
+                    // Don't overwrite user inputs while they're editing this card
+                    const isEditing = card.dataset.editing === '1';
+                    const hasFocus = document.activeElement && card.contains(document.activeElement);
+                    if (!isEditing && !hasFocus) {
+                        const b = (typeof st.brightness === 'number') ? st.brightness : 100;
+                        if (range && input) {
+                            range.value = b;
+                            input.value = b;
+                        }
+                        const c = st.color_full || '#ffffff';
+                        if (cp && ct && /^#[0-9A-Fa-f]{6}$/.test(c)) {
+                            cp.value = c;
+                            ct.value = c;
+                        }
+                    }
+                }
+            });
+        } catch (e) {
+            // keep quiet; dashboard should still function
+        }
+    }
+
+    async function runSceneByName(sceneName, btnEl) {
+        if (btnEl) {
+            btnEl.disabled = true;
+            btnEl.classList.add('opacity-70');
+        }
+        try {
+            // Dashboard behavior: always SET the selected scene (never toggle-off).
+            // (Toggle behavior can be triggered via the explicit *_toggle endpoint when desired.)
+            const response = await fetch(`/api/trigger/scene/${encodeURIComponent(sceneName)}`, { method: 'GET' });
+            // Results are now shown on the Diagnostics page (Last Scene Run).
+            // Keep dashboard lightweight: just flash the button on success/failure.
+            if (btnEl) {
+                btnEl.classList.remove('ring-2', 'ring-green-500', 'ring-red-500');
+                btnEl.classList.add('ring-2', response.ok ? 'ring-green-500' : 'ring-red-500');
+                setTimeout(() => btnEl.classList.remove('ring-2', 'ring-green-500', 'ring-red-500'), 900);
+            }
+        } catch (err) {
+            if (btnEl) {
+                btnEl.classList.add('ring-2', 'ring-red-500');
+                setTimeout(() => btnEl.classList.remove('ring-2', 'ring-red-500'), 1200);
+            }
+        } finally {
+            if (btnEl) {
+                btnEl.disabled = false;
+                btnEl.classList.remove('opacity-70');
+            }
+        }
+    }
+
+    // Refresh status periodically (fast cached endpoint)
+    initDeviceControls();
+    refreshDeviceStatus();
+    setInterval(refreshDeviceStatus, 3000);
+</script>
+
+
+</body>
+</html>

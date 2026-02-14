@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Routines - Kasa Bridge</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen">
+<nav class="bg-slate-800 p-4 shadow-lg mb-8">
+<div class="container mx-auto flex justify-between items-center">
+<h1 class="text-xl font-bold tracking-tight">Kasa Basement Bridge</h1>
+<div class="flex gap-4">
+<a href="/" class="text-slate-400 hover:text-white transition-colors">Dashboard</a>
+<a href="/scenes" class="text-slate-400 hover:text-white transition-colors">Scenes</a>
+<a href="/map" class="text-slate-400 hover:text-white transition-colors">Map</a>
+</div>
+</div>
+</nav>
+
+<main class="container mx-auto px-4 max-w-5xl">
+    <h2 class="text-3xl font-bold mb-8">Routines</h2>
+
+    <section class="bg-slate-800 p-6 rounded-2xl border border-slate-700 mb-8">
+        <h3 class="text-xl font-semibold mb-4">{% if edit_routine %}Edit Routine{% else %}Create Routine{% endif %}</h3>
+        <form id="routineForm" action="{% if edit_routine %}/routines/update/{{ edit_idx }}{% else %}/routines/create{% endif %}" method="post">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div class="md:col-span-2">
+                    <label class="block text-sm text-slate-400 mb-1">Name</label>
+                    <input name="name" required value="{% if edit_routine %}{{ edit_routine.name|e }}{% endif %}"
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Time (daily)</label>
+                    <input type="time" name="time_hhmm" required value="{% if edit_routine %}{{ edit_routine.time_hhmm }}{% endif %}"
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2">
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 mb-4">
+                <input type="checkbox" name="enabled" value="1" {% if not edit_routine or edit_routine.enabled %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled</span>
+            </div>
+
+            <div class="mb-3 flex items-center justify-between">
+                <h4 class="text-lg font-semibold">Actions</h4>
+                <button type="button" onclick="addActionRow()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg text-sm">
+                    Add Action
+                </button>
+            </div>
+            <div id="actionRows" class="space-y-3"></div>
+
+            <input type="hidden" name="actions_json" id="actionsJson">
+
+            <div class="mt-6 flex gap-2">
+                <button type="submit" onclick="serializeActions()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-lg">
+                    {% if edit_routine %}Save{% else %}Create{% endif %}
+                </button>
+                {% if edit_routine %}
+                <a href="/routines" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-6 rounded-lg">Cancel</a>
+                {% endif %}
+            </div>
+        </form>
+    </section>
+
+    <section class="mb-8">
+        <h3 class="text-xl font-semibold mb-4 text-slate-400">Existing Routines</h3>
+        {% if not routines %}
+        <div class="bg-slate-800 rounded-xl p-6 text-slate-400">No routines yet.</div>
+        {% else %}
+        <div class="space-y-3">
+            {% for r in routines %}
+            <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700 flex justify-between items-start">
+                <div class="flex-1">
+                    <div class="font-semibold text-lg">{{ r.name }}</div>
+                    <div class="text-sm text-slate-400 font-mono mt-1">{{ r.time_hhmm }} {% if r.enabled %}(enabled){% else %}(disabled){% endif %}</div>
+                    {% if r.last_run_date %}
+                    <div class="text-xs text-slate-500 mt-1">Last run: {{ r.last_run_date }}</div>
+                    {% endif %}
+                </div>
+                <div class="flex gap-2">
+                    <form action="/routines/run/{{ r.idx }}" method="post">
+                        <button class="bg-green-700 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm">Run now</button>
+                    </form>
+                    <a href="/routines?edit={{ r.idx }}" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg text-sm">Edit</a>
+                    <form action="/routines/delete/{{ r.idx }}" method="post">
+                        <button onclick="return confirm('Delete routine {{ r.name }}?')" class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg text-sm">Delete</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </section>
+</main>
+
+<script type="application/json" id="scenesJs">{{ scenes_js | tojson }}</script>
+<script type="application/json" id="roomsJs">{{ rooms_js | tojson }}</script>
+{% if edit_actions_js %}
+<script type="application/json" id="editActionsJs">{{ edit_actions_js | tojson }}</script>
+{% endif %}
+
+<script>
+    const scenes = JSON.parse(document.getElementById('scenesJs').textContent);
+    const rooms = JSON.parse(document.getElementById('roomsJs').textContent);
+    const actionRowsEl = document.getElementById('actionRows');
+
+    function rowTemplate(action) {
+        const kind = action?.kind || 'scene';
+        const sceneName = action?.scene_name || '';
+        const roomIdx = (action?.room_idx ?? '');
+        const groupAction = action?.group_action || 'on';
+
+        return `
+        <div class="bg-slate-900 border border-slate-700 rounded-xl p-4">
+            <div class="flex items-center justify-between gap-3 mb-3">
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-slate-400">Type</label>
+                    <select class="bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm" data-kind onchange="onKindChange(this)">
+                        <option value="scene" ${kind==='scene'?'selected':''}>Scene</option>
+                        <option value="group" ${kind==='group'?'selected':''}>Group</option>
+                    </select>
+                </div>
+                <button type="button" onclick="this.closest('.bg-slate-900').remove()" class="text-red-300 hover:text-red-200 text-sm">Remove</button>
+            </div>
+
+            <div data-scene-fields class="${kind==='scene'?'':'hidden'}">
+                <label class="block text-sm text-slate-400 mb-1">SET Scene</label>
+                <select class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm" data-scene-name>
+                    <option value="">Select…</option>
+                    ${scenes.map(s => `<option value="${escapeHtml(s)}" ${s===sceneName?'selected':''}>${escapeHtml(s)}</option>`).join('')}
+                </select>
+                <p class="text-xs text-slate-500 mt-1">You can select dim variants like <span class="font-mono">MyScene_d2</span> or <span class="font-mono">MyScene_d4</span>.</p>
+            </div>
+
+            <div data-group-fields class="${kind==='group'?'':'hidden'}">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm text-slate-400 mb-1">Group (Room)</label>
+                        <select class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm" data-room-idx>
+                            <option value="">Select…</option>
+                            ${rooms.map(r => `<option value="${r.idx}" ${String(r.idx)===String(roomIdx)?'selected':''}>${escapeHtml(r.name)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-slate-400 mb-1">Action</label>
+                        <select class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm" data-group-action>
+                            <option value="on" ${groupAction==='on'?'selected':''}>ON</option>
+                            <option value="off" ${groupAction==='off'?'selected':''}>OFF</option>
+                            <option value="toggle" ${groupAction==='toggle'?'selected':''}>TOGGLE</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    function escapeHtml(text) {
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    function addActionRow(action) {
+        actionRowsEl.insertAdjacentHTML('beforeend', rowTemplate(action));
+    }
+
+    function onKindChange(sel) {
+        const row = sel.closest('.bg-slate-900');
+        const kind = sel.value;
+        row.querySelector('[data-scene-fields]').classList.toggle('hidden', kind !== 'scene');
+        row.querySelector('[data-group-fields]').classList.toggle('hidden', kind !== 'group');
+    }
+
+    function serializeActions() {
+        const rows = Array.from(actionRowsEl.children);
+        const actions = rows.map(row => {
+            const kind = row.querySelector('[data-kind]').value;
+            if (kind === 'scene') {
+                return { kind: 'scene', scene_name: row.querySelector('[data-scene-name]').value || null };
+            }
+            return {
+                kind: 'group',
+                room_idx: row.querySelector('[data-room-idx]').value === '' ? null : parseInt(row.querySelector('[data-room-idx]').value, 10),
+                group_action: row.querySelector('[data-group-action]').value
+            };
+        });
+        document.getElementById('actionsJson').value = JSON.stringify(actions);
+    }
+
+    // Init
+    const editEl = document.getElementById('editActionsJs');
+    if (editEl) {
+        const actions = JSON.parse(editEl.textContent) || [];
+        if (actions.length === 0) addActionRow();
+        else actions.forEach(a => addActionRow(a));
+    } else {
+        addActionRow();
+    }
+</script>
+
+</body>
+</html>
+
+

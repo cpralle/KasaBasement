@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Room Map - {{ room_name }}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen">
+<nav class="bg-slate-800 p-4 shadow-lg mb-8">
+<div class="container mx-auto flex justify-between items-center">
+<h1 class="text-xl font-bold tracking-tight">Kasa Basement Bridge</h1>
+<div class="flex gap-4">
+<a href="/map" class="text-slate-400 hover:text-white transition-colors">Map</a>
+<a href="/scenes" class="text-slate-400 hover:text-white transition-colors">Scenes</a>
+<a href="/" class="text-slate-400 hover:text-white transition-colors">Dashboard</a>
+</div>
+</div>
+</nav>
+
+<main class="container mx-auto px-4 max-w-5xl">
+    <div class="flex items-start justify-between gap-6 mb-6">
+        <div>
+            <h2 class="text-3xl font-bold">Room Map</h2>
+            <p class="text-slate-400 mt-1">
+                Room: <span class="font-mono">{{ room_name }}</span>
+            </p>
+            <p class="text-xs text-slate-500 font-mono mt-1">Size: {{ room_rows }}×{{ room_cols }}</p>
+        </div>
+        <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+            <div>
+                <div class="text-sm text-slate-300 mb-2">Render mode</div>
+                <label class="flex items-center gap-2 text-sm">
+                    <input type="radio" name="renderMode" value="max" checked onchange="setRenderMode(this.value)">
+                    Max brightness
+                </label>
+                <label class="flex items-center gap-2 text-sm mt-1">
+                    <input type="radio" name="renderMode" value="current" onchange="setRenderMode(this.value)">
+                    Current brightness
+                </label>
+            </div>
+
+            <div>
+                <div class="text-sm text-slate-300 mb-2">Data source</div>
+                <label class="flex items-center gap-2 text-sm">
+                    <input type="radio" name="dataMode" value="live" checked onchange="setDataMode(this.value)">
+                    Live status (updates on scene run)
+                </label>
+                <label class="flex items-center gap-2 text-sm mt-1">
+                    <input type="radio" name="dataMode" value="map" onchange="setDataMode(this.value)">
+                    Map config (static)
+                </label>
+                <div id="liveMsg" class="text-xs text-slate-400 mt-2"></div>
+            </div>
+
+            <div>
+                <div class="text-sm text-slate-300 mb-2">Grid size</div>
+                <div class="flex gap-2 items-center">
+                    <input id="rowsInput" type="number" min="1" max="20" value="{{ room_rows }}"
+                           class="w-20 bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm">
+                    <span class="text-slate-400">×</span>
+                    <input id="colsInput" type="number" min="1" max="20" value="{{ room_cols }}"
+                           class="w-20 bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm">
+                    <button onclick="resizeGrid()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm">
+                        Apply
+                    </button>
+                </div>
+                <div id="resizeMsg" class="text-xs text-slate-400 mt-2"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="gridContainer" class="grid gap-2 bg-slate-800/50 border border-slate-700 rounded-2xl p-4"
+         style="grid-template-columns: repeat({{ room_cols }}, minmax(0, 1fr));">
+        {% for i in range(room_rows * room_cols) %}
+        <button class="aspect-square rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 transition-colors relative flex items-end justify-start p-1"
+                id="cell-{{ i }}"
+                data-cell-idx="{{ i }}"
+                type="button">
+            <span class="text-[10px] leading-tight text-slate-100/90 drop-shadow max-w-full whitespace-normal break-words" data-cell-label></span>
+        </button>
+        {% endfor %}
+    </div>
+
+    <div class="mt-6 text-sm text-slate-400">
+        Click a tile to add/edit/remove a device action. This room map is saved automatically.
+    </div>
+</main>
+
+<!-- Modal -->
+<div id="modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-4">
+    <div class="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-2xl p-6">
+        <div class="flex items-start justify-between gap-4 mb-4">
+            <div>
+                <h3 class="text-xl font-semibold">Tile <span id="modalIdx" class="font-mono"></span></h3>
+                <p id="modalSub" class="text-sm text-slate-400 mt-1"></p>
+            </div>
+            <button class="text-slate-400 hover:text-white" onclick="closeModal()">Close</button>
+        </div>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Device</label>
+                <select id="deviceAlias" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm">
+                    <option value="">Select…</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Action</label>
+                <select id="deviceAction" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm" onchange="refreshModalBulbControls()">
+                    <option value="on">On</option>
+                    <option value="off">Off</option>
+                    <option value="toggle">Toggle</option>
+                </select>
+            </div>
+
+            <div id="bulbControls" class="space-y-3">
+                <div class="flex items-center gap-3">
+                    <label class="text-sm text-slate-400 w-24">Brightness</label>
+                    <input id="brightness" type="range" min="0" max="100" value="100" class="flex-1" oninput="document.getElementById('brightnessNum').value=this.value">
+                    <input id="brightnessNum" type="number" min="0" max="100" value="100" class="w-20 bg-slate-800 border border-slate-700 rounded-lg p-1 text-sm" oninput="document.getElementById('brightness').value=this.value">
+                </div>
+                <div class="flex items-center gap-3">
+                    <label class="text-sm text-slate-400 w-24">Color</label>
+                    <input id="colorPicker" type="color" value="#ffffff" class="h-10 w-14 bg-slate-800 border border-slate-700 rounded-lg p-1"
+                           onchange="document.getElementById('colorText').value=this.value">
+                    <input id="colorText" type="text" value="#ffffff" class="w-28 bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm font-mono"
+                           onchange="if(/^#[0-9A-Fa-f]{6}$/.test(this.value)){document.getElementById('colorPicker').value=this.value}">
+                    <div class="ml-auto flex items-center gap-2">
+                        <div class="w-10 h-10 rounded border border-slate-600" title="Full brightness color" id="previewFull"></div>
+                        <div class="w-10 h-10 rounded border border-slate-600" title="Brightness-applied color" id="previewCurrent"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-2 pt-2">
+                <button class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm" onclick="saveCell()">
+                    Save
+                </button>
+                <button class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm" onclick="removeCell()">
+                    Remove
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="application/json" id="devicesJs">{{ devices_js | tojson }}</script>
+<script type="application/json" id="gridJs">{{ grid_js | tojson }}</script>
+
+<script>
+    const roomIdx = {{ room_idx }};
+    const devices = JSON.parse(document.getElementById('devicesJs').textContent);
+    let grid = JSON.parse(document.getElementById('gridJs').textContent); // 64 cells
+    let renderMode = 'max'; // 'max' | 'current'
+    let dataMode = 'live'; // 'live' | 'map'
+    let activeIdx = null;
+    let rows = {{ room_rows }};
+    let cols = {{ room_cols }};
+    let dragFromIdx = null;
+    let dragActive = false;
+    let liveStatusByAlias = new Map();
+    const pendingTargetsByAlias = new Map(); // alias -> { power, brightness, color, ts }
+    const applyResultByAlias = new Map(); // alias -> { ok, message, ts }
+    let reconcileTimer = null;
+
+    function hexApplyBrightness(hexColor, brightness) {
+        const c = String(hexColor || '').replace('#', '');
+        if (!/^[0-9A-Fa-f]{6}$/.test(c)) return '#000000';
+        const r = parseInt(c.slice(0,2), 16);
+        const g = parseInt(c.slice(2,4), 16);
+        const b = parseInt(c.slice(4,6), 16);
+        const br = Math.max(0, Math.min(100, parseInt(brightness || '100', 10))) / 100.0;
+        const r2 = Math.floor(r * br);
+        const g2 = Math.floor(g * br);
+        const b2 = Math.floor(b * br);
+        return `#${r2.toString(16).padStart(2,'0')}${g2.toString(16).padStart(2,'0')}${b2.toString(16).padStart(2,'0')}`;
+    }
+
+    function cellDisplayColor(cell) {
+        if (!cell) return { bg: null, title: 'Empty' };
+
+        const alias = cell.device_alias || '';
+        const pending = alias ? pendingTargetsByAlias.get(alias) : null;
+
+        // Live mode: paint from actual device status if we have it
+        if (dataMode === 'live' && alias && liveStatusByAlias.has(alias)) {
+            const st = liveStatusByAlias.get(alias);
+            if (!st || !st.reachable) return { bg: '#0b1220', title: `${alias} (offline)` };
+            if (st.is_on === false) return { bg: '#0b1220', title: `${alias} (off)` };
+            const bg = (renderMode === 'current')
+                ? (st.color_current || '#111111')
+                : (st.color_full || '#ffffff');
+            return { bg, title: `${alias} (live)` };
+        }
+
+        // If we have a pending target (optimistic), render it immediately
+        if (dataMode === 'live' && pending) {
+            const pwr = pending.power || 'on';
+            if (pwr === 'off') return { bg: '#0b1220', title: `${alias} (target off)` };
+            const color = pending.color || '#ffffff';
+            const br = (typeof pending.brightness === 'number') ? pending.brightness : 100;
+            const bg = (renderMode === 'current') ? hexApplyBrightness(color, br) : color;
+            return { bg, title: `${alias} (target)` };
+        }
+
+        // Map mode: paint from configured params
+        if (cell.action === 'off') return { bg: '#0b1220', title: `${alias} / off` };
+        const params = cell.params || {};
+        const color = params.color || '#ffffff';
+        const brightness = (typeof params.brightness === 'number') ? params.brightness : 100;
+        const bg = (renderMode === 'current') ? hexApplyBrightness(color, brightness) : color;
+        return { bg, title: `${alias} / ${cell.action}` };
+    }
+
+    function renderGrid() {
+        for (let i = 0; i < (rows * cols); i++) {
+            const el = document.getElementById(`cell-${i}`);
+            const cell = grid[i] || null;
+            const disp = cellDisplayColor(cell);
+            const labelEl = el.querySelector('[data-cell-label]');
+            if (!cell) {
+                el.style.backgroundColor = '';
+                el.title = 'Empty';
+                if (labelEl) labelEl.textContent = '';
+                el.classList.remove('ring-2', 'ring-yellow-400', 'ring-red-500');
+                continue;
+            }
+            el.style.backgroundColor = disp.bg || '';
+            el.title = disp.title || '';
+            if (labelEl) labelEl.textContent = cell.device_alias || '';
+
+            // Highlight failures/pending in live mode
+            el.classList.remove('ring-2', 'ring-yellow-400', 'ring-red-500');
+            const alias = cell.device_alias || '';
+            const pending = alias ? pendingTargetsByAlias.get(alias) : null;
+            const res = alias ? applyResultByAlias.get(alias) : null;
+            if (dataMode === 'live' && pending) {
+                el.classList.add('ring-2', 'ring-yellow-400');
+            }
+            if (dataMode === 'live' && res && res.ok === false) {
+                el.classList.remove('ring-yellow-400');
+                el.classList.add('ring-2', 'ring-red-500');
+            }
+        }
+    }
+
+    function updateDraggable() {
+        for (let i = 0; i < (rows * cols); i++) {
+            const el = document.getElementById(`cell-${i}`);
+            el.draggable = Boolean(grid[i]);
+        }
+    }
+
+    async function persistGrid() {
+        await fetch(`/api/rooms/${roomIdx}/map`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ grid })
+        });
+    }
+
+    async function resizeGrid() {
+        const msg = document.getElementById('resizeMsg');
+        msg.textContent = 'Resizing...';
+        const newRows = parseInt(document.getElementById('rowsInput').value || '0', 10);
+        const newCols = parseInt(document.getElementById('colsInput').value || '0', 10);
+        try {
+            const resp = await fetch(`/api/rooms/${roomIdx}/resize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rows: newRows, cols: newCols })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+            // reload page to redraw grid structure cleanly
+            window.location.reload();
+        } catch (e) {
+            msg.textContent = `Resize failed: ${e.message || e}`;
+        }
+    }
+
+    function setRenderMode(mode) {
+        renderMode = mode;
+        renderGrid();
+    }
+
+    function setDataMode(mode) {
+        dataMode = mode;
+        renderGrid();
+    }
+
+    async function refreshLiveStatus(force = false) {
+        if (dataMode !== 'live') return;
+        const msg = document.getElementById('liveMsg');
+        try {
+            msg.textContent = `Refreshing live status... (pending: ${pendingTargetsByAlias.size})`;
+            const resp = await fetch(force ? '/api/device-status?force=1' : '/api/device-status');
+            const data = await resp.json();
+            const devices = (data && data.devices) ? data.devices : [];
+            liveStatusByAlias = new Map(devices.map(d => [d.alias, d]));
+            msg.textContent = `Live updated ${new Date().toLocaleTimeString()} (pending: ${pendingTargetsByAlias.size})`;
+
+            function hexToRgb(hex) {
+                const c = String(hex || '').replace('#', '');
+                if (!/^[0-9A-Fa-f]{6}$/.test(c)) return null;
+                return {
+                    r: parseInt(c.slice(0,2), 16),
+                    g: parseInt(c.slice(2,4), 16),
+                    b: parseInt(c.slice(4,6), 16),
+                };
+            }
+            function rgbDist(a, b) {
+                return Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b);
+            }
+            function colorsClose(aHex, bHex, threshold = 24) {
+                const a = hexToRgb(aHex);
+                const b = hexToRgb(bHex);
+                if (!a || !b) return false;
+                return rgbDist(a, b) <= threshold;
+            }
+
+            // Reconcile:
+            // - Keep targets "pending" (yellow) for a grace period to avoid false failures.
+            // - Only mark failure (red) if still mismatching after the grace window.
+            const now = Date.now();
+            for (const [alias, t] of pendingTargetsByAlias.entries()) {
+                const st = liveStatusByAlias.get(alias);
+                if (!st || !st.reachable) continue;
+                // Compare best-effort
+                let ok = true;
+                if (t.power === 'off') ok = (st.is_on === false);
+                if (t.power === 'on') ok = (st.is_on === true || st.is_on === null);
+                if (typeof t.brightness === 'number' && typeof st.brightness === 'number') {
+                    ok = ok && (Math.abs(st.brightness - t.brightness) <= 5);
+                }
+                if (t.color) {
+                    // Devices often report slightly different hex due to rounding/gamut.
+                    // Accept close match against either reported full or current color.
+                    const targetFull = String(t.color).toLowerCase();
+                    const targetCurrent = (typeof t.brightness === 'number')
+                        ? hexApplyBrightness(targetFull, t.brightness)
+                        : null;
+                    const fullOk = st.color_full ? colorsClose(st.color_full, targetFull, 48) : false;
+                    const currOk = st.color_current && targetCurrent ? colorsClose(st.color_current, targetCurrent, 48) : false;
+                    // If we have neither comparison available, don't fail on color
+                    if (st.color_full || st.color_current) {
+                        ok = ok && (fullOk || currOk);
+                    }
+                }
+                if (ok) {
+                    pendingTargetsByAlias.delete(alias);
+                    applyResultByAlias.set(alias, { ok: true, message: 'matched', ts: now });
+                } else {
+                    const ageMs = now - (t.ts || now);
+                    const graceMs = 9000;
+                    // During grace period, keep as pending (yellow) and avoid red false negatives.
+                    if (ageMs < graceMs) {
+                        // Keep pending; don't mark failure yet.
+                        applyResultByAlias.set(alias, { ok: null, message: 'pending', ts: now });
+                    } else {
+                        applyResultByAlias.set(alias, { ok: false, message: 'did not match target', ts: now });
+                    }
+                }
+            }
+            // prune old apply results
+            for (const [alias, r] of applyResultByAlias.entries()) {
+                if (now - (r.ts || 0) > 15000) applyResultByAlias.delete(alias);
+            }
+
+            renderGrid();
+        } catch (e) {
+            msg.textContent = `Live update failed: ${e.message || e}`;
+        }
+    }
+
+    function ensureReconcileLoop() {
+        if (reconcileTimer) return;
+        // Poll live status while we have pending targets, so we don't rely solely on scene_run delivery timing.
+        reconcileTimer = setInterval(async () => {
+            if (dataMode !== 'live') return;
+            if (pendingTargetsByAlias.size === 0) {
+                clearInterval(reconcileTimer);
+                reconcileTimer = null;
+                return;
+            }
+            await refreshLiveStatus(true);
+        }, 2000);
+    }
+
+    function deviceType(alias) {
+        const d = devices.find(x => x.alias === alias);
+        return d ? String(d.type || '').toLowerCase() : '';
+    }
+
+    function refreshModalBulbControls() {
+        const alias = document.getElementById('deviceAlias').value;
+        const action = document.getElementById('deviceAction').value;
+        const isBulb = deviceType(alias) === 'bulb';
+        const show = isBulb && action === 'on';
+        document.getElementById('bulbControls').style.display = show ? 'block' : 'none';
+        refreshModalPreviews();
+    }
+
+    function refreshModalPreviews() {
+        const color = document.getElementById('colorText').value || '#ffffff';
+        const b = document.getElementById('brightnessNum').value || '100';
+        document.getElementById('previewFull').style.backgroundColor = color;
+        document.getElementById('previewCurrent').style.backgroundColor = hexApplyBrightness(color, b);
+    }
+
+    function openCell(idx) {
+        activeIdx = idx;
+        document.getElementById('modalIdx').textContent = idx;
+        const cell = grid[idx] || null;
+        document.getElementById('modalSub').textContent = cell ? `${cell.device_alias} / ${cell.action}` : 'Empty';
+
+        const sel = document.getElementById('deviceAlias');
+        sel.innerHTML = '<option value="">Select…</option>' + devices.map(d => `<option value="${d.alias}">${d.alias} (${d.type})</option>`).join('');
+
+        if (cell) {
+            sel.value = cell.device_alias || '';
+            document.getElementById('deviceAction').value = cell.action || 'on';
+            const params = cell.params || {};
+            const br = (typeof params.brightness === 'number') ? params.brightness : 100;
+            document.getElementById('brightness').value = br;
+            document.getElementById('brightnessNum').value = br;
+            const c = params.color || '#ffffff';
+            document.getElementById('colorPicker').value = c;
+            document.getElementById('colorText').value = c;
+        } else {
+            sel.value = '';
+            document.getElementById('deviceAction').value = 'on';
+            document.getElementById('brightness').value = 100;
+            document.getElementById('brightnessNum').value = 100;
+            document.getElementById('colorPicker').value = '#ffffff';
+            document.getElementById('colorText').value = '#ffffff';
+        }
+
+        document.getElementById('brightness').oninput = function() {
+            document.getElementById('brightnessNum').value = this.value;
+            refreshModalPreviews();
+        };
+        document.getElementById('brightnessNum').oninput = function() {
+            document.getElementById('brightness').value = this.value;
+            refreshModalPreviews();
+        };
+        document.getElementById('colorPicker').onchange = function() {
+            document.getElementById('colorText').value = this.value;
+            refreshModalPreviews();
+        };
+        document.getElementById('colorText').oninput = function() {
+            if (/^#[0-9A-Fa-f]{6}$/.test(this.value)) {
+                document.getElementById('colorPicker').value = this.value;
+                refreshModalPreviews();
+            }
+        };
+
+        document.getElementById('modal').classList.remove('hidden');
+        refreshModalBulbControls();
+    }
+
+    function closeModal() {
+        document.getElementById('modal').classList.add('hidden');
+        activeIdx = null;
+    }
+
+    async function saveCell() {
+        if (activeIdx === null) return;
+        const alias = document.getElementById('deviceAlias').value;
+        if (!alias) return;
+        const action = document.getElementById('deviceAction').value;
+        const cell = { device_alias: alias, action: action, params: null };
+
+        const isBulb = deviceType(alias) === 'bulb';
+        if (isBulb && action === 'on') {
+            const br = parseInt(document.getElementById('brightnessNum').value || '100', 10);
+            const color = document.getElementById('colorText').value || '#ffffff';
+            cell.params = { brightness: Math.max(0, Math.min(100, br)), color: color };
+        }
+
+        grid[activeIdx] = cell;
+        renderGrid();
+        await persistGrid();
+        closeModal();
+    }
+
+    async function removeCell() {
+        if (activeIdx === null) return;
+        grid[activeIdx] = null;
+        renderGrid();
+        await persistGrid();
+        closeModal();
+    }
+
+    renderGrid();
+    updateDraggable();
+    refreshLiveStatus(true);
+
+    // Click + drag/drop handlers (single attachment, avoids click-vs-drag flakiness)
+    const gridEl = document.getElementById('gridContainer');
+    gridEl.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-cell-idx]');
+        if (!btn) return;
+        // If a drag just happened, swallow the click.
+        if (dragActive) {
+            dragActive = false;
+            return;
+        }
+        const idx = parseInt(btn.dataset.cellIdx || '-1', 10);
+        if (idx >= 0) openCell(idx);
+    });
+
+    gridEl.addEventListener('dragstart', (ev) => {
+        const btn = ev.target.closest('[data-cell-idx]');
+        if (!btn) return;
+        const idx = parseInt(btn.dataset.cellIdx || '-1', 10);
+        if (idx < 0 || !grid[idx]) {
+            ev.preventDefault();
+            return;
+        }
+        dragFromIdx = idx;
+        dragActive = true;
+        ev.dataTransfer.effectAllowed = 'move';
+        ev.dataTransfer.setData('text/plain', String(idx));
+    });
+
+    gridEl.addEventListener('dragover', (ev) => {
+        if (dragFromIdx === null) return;
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = 'move';
+    });
+
+    gridEl.addEventListener('drop', async (ev) => {
+        ev.preventDefault();
+        const btn = ev.target.closest('[data-cell-idx]');
+        if (!btn) return;
+        const to = parseInt(btn.dataset.cellIdx || '-1', 10);
+        const from = dragFromIdx;
+        dragFromIdx = null;
+        if (from === null || to < 0 || from === to) return;
+        // swap
+        const tmp = grid[to] || null;
+        grid[to] = grid[from];
+        grid[from] = tmp;
+        renderGrid();
+        updateDraggable();
+        await persistGrid();
+    });
+
+    // Subscribe to server events so multi-screen dashboards can drive map updates
+    try {
+        const es = new EventSource('/api/events');
+        es.addEventListener('scene_target', async (ev) => {
+            // Apply optimistic targets immediately
+            try {
+                const msg = JSON.parse(ev.data);
+                const actions = (msg && msg.payload && msg.payload.actions) ? msg.payload.actions : [];
+                const now = Date.now();
+                actions.forEach(a => {
+                    const alias = a.device_alias;
+                    const p = {};
+                    if (a.action === 'off') p.power = 'off';
+                    else if (a.action === 'on') p.power = 'on';
+                    else if (a.action === 'toggle') p.power = 'toggle';
+                    if (a.params && typeof a.params.brightness === 'number') p.brightness = a.params.brightness;
+                    if (a.params && a.params.color) p.color = a.params.color;
+                    pendingTargetsByAlias.set(alias, { ...p, ts: now });
+                });
+                renderGrid();
+                ensureReconcileLoop();
+            } catch (e) {}
+        });
+        es.addEventListener('device_target', async (ev) => {
+            try {
+                const msg = JSON.parse(ev.data);
+                const p = (msg && msg.payload) ? msg.payload : {};
+                const alias = p.alias;
+                if (!alias) return;
+                pendingTargetsByAlias.set(alias, { power: p.power, brightness: p.brightness, color: p.color, ts: Date.now() });
+                renderGrid();
+                ensureReconcileLoop();
+            } catch (e) {}
+        });
+        es.addEventListener('device_applied', async (ev) => {
+            try {
+                const msg = JSON.parse(ev.data);
+                const p = (msg && msg.payload) ? msg.payload : {};
+                const alias = p.alias;
+                if (!alias) return;
+                applyResultByAlias.set(alias, { ok: !!p.ok, message: p.message || '', ts: Date.now() });
+                if (p.ok === false) {
+                    // keep pending so it stays highlighted
+                }
+                renderGrid();
+                ensureReconcileLoop();
+            } catch (e) {}
+        });
+        es.addEventListener('scene_run', async (ev) => {
+            // whenever a scene runs anywhere, refresh live status and repaint
+            await refreshLiveStatus(true);
+        });
+        es.addEventListener('hello', () => {});
+        es.addEventListener('ping', () => {});
+    } catch (e) {
+        // ignore; SSE may be unavailable in some browsers
+    }
+</script>
+</body>
+</html>
+
+

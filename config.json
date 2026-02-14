@@ -1,0 +1,889 @@
+{
+    "devices": [
+        {
+            "alias": "Basement Stair LED",
+            "mac": "8c:86:dd:c3:42:e6",
+            "host": "192.168.86.250",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 03",
+            "mac": "30:68:93:57:d2:08",
+            "host": "192.168.86.39",
+            "type": "Bulb"
+        },
+        {
+            "alias": "basement LED 07",
+            "mac": "30:68:93:57:e8:d5",
+            "host": "192.168.86.52",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 11",
+            "mac": "8c:86:dd:c3:44:5d",
+            "host": "192.168.86.47",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 13",
+            "mac": "8c:86:dd:c3:4d:0c",
+            "host": "192.168.86.48",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 06",
+            "mac": "30:68:93:57:e7:b7",
+            "host": "192.168.86.40",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 02",
+            "mac": "30:68:93:58:08:61",
+            "host": "192.168.86.41",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 01",
+            "mac": "30:68:93:57:f1:0f",
+            "host": "192.168.86.38",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 09",
+            "mac": "8c:86:dd:c3:31:1e",
+            "host": "192.168.86.46",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 12",
+            "mac": "8c:86:dd:c3:33:9f",
+            "host": "192.168.86.43",
+            "type": "Bulb"
+        },
+        {
+            "alias": "basement LED 08",
+            "mac": "30:68:93:57:d6:d2",
+            "host": "192.168.86.42",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 14",
+            "mac": "8c:86:dd:99:ed:73",
+            "host": "192.168.86.51",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 05",
+            "mac": "30:68:93:57:e6:d6",
+            "host": "192.168.86.45",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 04",
+            "mac": "30:68:93:57:fc:72",
+            "host": "192.168.86.53",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 10",
+            "mac": "8c:86:dd:c3:5b:c3",
+            "host": "192.168.86.44",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Basement LED 15",
+            "mac": "8c:86:dd:c3:3c:da",
+            "host": "192.168.86.49",
+            "type": "Bulb"
+        }
+    ],
+    "scenes": [
+        {
+            "name": "Sunset",
+            "actions": [
+                {
+                    "device_alias": "Basement LED 01",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ffdd00"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 02",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ffdd00"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 03",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ffdd00"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 04",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ffdd00"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 05",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ffdd00"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 06",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ffdd00"
+                    }
+                },
+                {
+                    "device_alias": "basement LED 07",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ffdd00"
+                    }
+                },
+                {
+                    "device_alias": "basement LED 08",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ffdd00"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 09",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ffdd00"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 10",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 11",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 12",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 13",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 14",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 15",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ffdd00"
+                    }
+                }
+            ],
+            "room_idx": 0,
+            "dim_profile": "aggressive",
+            "grid_map": null
+        },
+        {
+            "name": "BasementOn",
+            "actions": [
+                {
+                    "device_alias": "Basement LED 01",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 02",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 03",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 04",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 05",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 06",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "basement LED 07",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "basement LED 08",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 09",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 10",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 11",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 12",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 13",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 14",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 15",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                }
+            ],
+            "room_idx": 0,
+            "dim_profile": "aggressive",
+            "grid_map": null
+        },
+        {
+            "name": "TestScene",
+            "actions": [],
+            "room_idx": null,
+            "dim_profile": "linear",
+            "grid_map": null
+        },
+        {
+            "name": "TvRoom",
+            "actions": [
+                {
+                    "device_alias": "Basement LED 01",
+                    "action": "on",
+                    "params": {
+                        "brightness": 28,
+                        "color": "#111111"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 02",
+                    "action": "on",
+                    "params": {
+                        "brightness": 28,
+                        "color": "#111111"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 03",
+                    "action": "on",
+                    "params": {
+                        "brightness": 16,
+                        "color": "#0a0a0a"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 04",
+                    "action": "on",
+                    "params": {
+                        "brightness": 16,
+                        "color": "#0a0a0a"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 05",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#020202"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 06",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#262626"
+                    }
+                },
+                {
+                    "device_alias": "basement LED 07",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#191919"
+                    }
+                },
+                {
+                    "device_alias": "basement LED 08",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#020202"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 09",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#020000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 10",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#000002"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 11",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#000200"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 12",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#000002"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 13",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#000200"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 14",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#020000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 15",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#020202"
+                    }
+                },
+                {
+                    "device_alias": "Basement Stair LED",
+                    "action": "on",
+                    "params": {
+                        "brightness": 4,
+                        "color": "#020202"
+                    }
+                }
+            ],
+            "room_idx": 0,
+            "dim_profile": "linear",
+            "grid_map": null
+        },
+        {
+            "name": "Karaoke",
+            "actions": [
+                {
+                    "device_alias": "Basement LED 01",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 02",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 03",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 04",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 05",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 06",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#0000ff"
+                    }
+                },
+                {
+                    "device_alias": "basement LED 07",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#0000ff"
+                    }
+                },
+                {
+                    "device_alias": "basement LED 08",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#0000ff"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 09",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#0000ff"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 10",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ff00ff"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 11",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ff00ff"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 12",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#fa00ff"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 13",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ff00ff"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 14",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ff00ff"
+                    }
+                },
+                {
+                    "device_alias": "Basement LED 15",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#0000ff"
+                    }
+                },
+                {
+                    "device_alias": "Basement Stair LED",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                }
+            ],
+            "room_idx": 0,
+            "dim_profile": "aggressive",
+            "grid_map": null
+        }
+    ],
+    "rooms": [
+        {
+            "name": "Basement",
+            "rows": 8,
+            "cols": 11,
+            "grid_map": [
+                {
+                    "device_alias": "Basement LED 01",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "Basement LED 03",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "Basement LED 05",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "basement LED 07",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "Basement LED 09",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "Basement LED 12",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                {
+                    "device_alias": "Basement LED 02",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "Basement LED 04",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "Basement LED 06",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "basement LED 08",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "Basement LED 10",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "Basement LED 13",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                {
+                    "device_alias": "Basement LED 15",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "Basement LED 11",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                {
+                    "device_alias": "Basement LED 14",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                {
+                    "device_alias": "Basement Stair LED",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ],
+            "active_scene": "Karaoke"
+        },
+        {
+            "name": "LivingRoom",
+            "rows": 3,
+            "cols": 4,
+            "grid_map": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ],
+            "active_scene": null
+        }
+    ],
+    "routines": [
+        {
+            "name": "Reset BasementON",
+            "time_hhmm": "04:30",
+            "enabled": true,
+            "actions": [
+                {
+                    "kind": "scene",
+                    "scene_name": "BasementOn",
+                    "room_idx": null,
+                    "group_action": null
+                },
+                {
+                    "kind": "group",
+                    "scene_name": null,
+                    "room_idx": 0,
+                    "group_action": "off"
+                }
+            ],
+            "last_run_date": "2026-01-07"
+        }
+    ]
+}
