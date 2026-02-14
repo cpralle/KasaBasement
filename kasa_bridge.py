@@ -2211,16 +2211,11 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
         await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=off_scene.name, res=res)
         return {"status": "success", "action": "off", "room": room.name, "results": res.get("results", [])}
     else:
-        # Turn ON: restore last active scene or use first mapped scene
-        restore_scene: Optional[Scene] = None
-        if room.active_scene:
-            restore_scene = next((s for s in mapped if s.name.lower() == room.active_scene.lower()), None)
-        if not restore_scene:
-            restore_scene = mapped[0]
-
-        res = await execute_scene(restore_scene)
-        await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=restore_scene.name, res=res)
-        return {"status": "success", "action": "on", "room": room.name, "scene": restore_scene.name, "results": res.get("results", [])}
+        # Turn ON: always use first mapped scene (predictable behavior)
+        on_scene = mapped[0]
+        res = await execute_scene(on_scene)
+        await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=on_scene.name, res=res)
+        return {"status": "success", "action": "on", "room": room.name, "scene": on_scene.name, "results": res.get("results", [])}
 
 async def _run_room_cycle(request: Request, room_name: str) -> dict:
     """
