@@ -1035,7 +1035,12 @@ async def routine_scheduler_loop():
                     continue
                 if r.last_run_date == today:
                     continue
-                # run in background so one slow routine doesn't block others
+                # Mark as run IMMEDIATELY to prevent double-triggering if loop runs again
+                # before the background task completes
+                r.last_run_date = today
+                save_config(config)
+                # Capture idx in a default argument to avoid race condition if config.routines
+                # is modified before the task executes
                 asyncio.create_task(run_routine(idx))
             await asyncio.sleep(20)
         except asyncio.CancelledError:
@@ -1717,7 +1722,7 @@ async def api_set_device(mac: str, request: Request):
 @app.post("/run-scene/{scene_idx}")
 async def run_scene(scene_idx: int):
     """Executes a defined scene."""
-    if scene_idx >= len(config.scenes):
+    if scene_idx < 0 or scene_idx >= len(config.scenes):
         raise HTTPException(status_code=404, detail="Scene not found")
     
     scene = config.scenes[scene_idx]
@@ -1924,7 +1929,7 @@ async def api_trigger_scene_index_get(
         {"scene_index": scene_idx, "method": "GET", "has_token": bool(token or x_token)},
     )
     verify_trigger_token(token or x_token)
-    if scene_idx >= len(config.scenes):
+    if scene_idx < 0 or scene_idx >= len(config.scenes):
         raise HTTPException(status_code=404, detail="Scene not found")
     scene = config.scenes[scene_idx]
     try:
@@ -1987,41 +1992,50 @@ async def _run_room_cycle(request: Request, room_name: str) -> dict:
     if not mapped:
         raise HTTPException(status_code=409, detail="No scenes mapped to this room")
 
-    # Determine next scene based on room.active_scene (base scene name).
-    active_lower = (room.active_scene or "").strip().lower()
-    names = [s.name for s in mapped]
-    # Normalize names to avoid subtle whitespace/case mismatches causing cycling to "stick" on index 0.
-    idx_map = {s.name.strip().lower(): i for i, s in enumerate(mapped)}
+    # Acquire the scene execution lock BEFORE determining the next scene.
+    # This prevents race conditions where two rapid cycle requests both read the same
+    # active_scene and try to advance to the same next scene.
+    async with scene_execution_lock:
+        # Determine next scene based on room.active_scene (base scene name).
+        active_lower = (room.active_scene or "").strip().lower()
+        names = [s.name for s in mapped]
+        # Normalize names to avoid subtle whitespace/case mismatches causing cycling to "stick" on index 0.
+        idx_map = {s.name.strip().lower(): i for i, s in enumerate(mapped)}
 
-    if active_lower in idx_map:
-        next_idx = (idx_map[active_lower] + 1) % len(mapped)
-    else:
-        next_idx = 0
+        if active_lower in idx_map:
+            next_idx = (idx_map[active_lower] + 1) % len(mapped)
+        else:
+            next_idx = 0
 
-    chosen = mapped[next_idx]
-    # Respect the room's last dim level (dial position) when cycling.
-    # If active_dim is missing/invalid, default to full brightness (d4).
-    dim = (getattr(room, "active_dim", None) or "d4").strip().lower()
-    suffix = f"_{dim}"
-    if suffix in DIM_SUFFIXES and suffix != "_d4":
-        run_scene = derive_dimmed_scene(chosen, suffix, dim_multiplier(chosen, suffix))
-    else:
-        run_scene = chosen
-    await log_event(
-        "room_cycle_chosen",
-        request,
-        {
-            "room": room.name,
-            "room_idx": room_idx,
-            "active_scene": room.active_scene,
-            "active_dim": getattr(room, "active_dim", None),
-            "mapped_scenes": names,
-            "chosen_scene": chosen.name,
-            "run_scene": run_scene.name,
-        },
-    )
+        chosen = mapped[next_idx]
+        # Respect the room's last dim level (dial position) when cycling.
+        # If active_dim is missing/invalid, default to full brightness (d4).
+        dim = (getattr(room, "active_dim", None) or "d4").strip().lower()
+        suffix = f"_{dim}"
+        if suffix in DIM_SUFFIXES and suffix != "_d4":
+            run_scene = derive_dimmed_scene(chosen, suffix, dim_multiplier(chosen, suffix))
+        else:
+            run_scene = chosen
 
-    # execute_scene will also refresh room.active_scene for this room
+        # Update active_scene immediately while we hold the lock
+        room.active_scene = chosen.name
+        save_config(config)
+
+        await log_event(
+            "room_cycle_chosen",
+            request,
+            {
+                "room": room.name,
+                "room_idx": room_idx,
+                "active_scene": room.active_scene,
+                "active_dim": getattr(room, "active_dim", None),
+                "mapped_scenes": names,
+                "chosen_scene": chosen.name,
+                "run_scene": run_scene.name,
+            },
+        )
+
+    # Execute scene outside the lock to avoid holding it during slow device operations
     res = await execute_scene(run_scene)
     try:
         results = res.get("results") or []
@@ -2518,7 +2532,7 @@ async def create_scene(request: Request):
 @app.post("/delete-scene/{scene_idx}")
 async def delete_scene(scene_idx: int):
     """Delete a scene."""
-    if scene_idx >= len(config.scenes):
+    if scene_idx < 0 or scene_idx >= len(config.scenes):
         raise HTTPException(status_code=404, detail="Scene not found")
     
     config.scenes.pop(scene_idx)
