@@ -2169,11 +2169,12 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
     if not room_device_aliases:
         raise HTTPException(status_code=409, detail="No devices found in room scenes")
 
-    # Check if any device is on (check cache first, then query)
+    # Check if any device is on (check cache first, then query uncached devices)
     now = time.time()
     any_on = False
+    devices_with_fresh_cache: set[str] = set()
 
-    # First check the state cache
+    # First check the state cache for all room devices
     async with _device_state_cache_lock:
         for alias in room_device_aliases:
             dev_cfg = alias_to_cfg.get(alias)
@@ -2182,14 +2183,41 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
             mac = normalize_mac(dev_cfg.mac)
             cached = _device_state_cache.get(mac)
             if cached and (now - cached["ts"]) < DEVICE_STATE_CACHE_TTL:
+                devices_with_fresh_cache.add(alias)
                 if cached["is_on"]:
                     any_on = True
-                    break
+                    # Don't break - continue checking to build full cache picture
 
-    # If no fresh cache, query one representative device
+    # If we found something on in cache, we're done
+    # If not, query devices that weren't in cache
     if not any_on:
-        # Use the first scene's representative device check
-        any_on = await is_scene_representative_on(mapped[0])
+        uncached_aliases = room_device_aliases - devices_with_fresh_cache
+        if uncached_aliases:
+            # Query actual device state for uncached devices
+            mac_to_device: dict[str, IotDevice] = {}
+
+            async def check_device(alias: str) -> bool:
+                dev_cfg = alias_to_cfg.get(alias)
+                if not dev_cfg:
+                    return False
+                try:
+                    device, _source = await resolve_device_for_config(dev_cfg, mac_to_device)
+                    if not device:
+                        return False
+                    return bool(read_device_is_on(device))
+                except Exception:
+                    return False
+
+            # Check uncached devices (with timeout to avoid blocking)
+            try:
+                results = await asyncio.wait_for(
+                    asyncio.gather(*[check_device(alias) for alias in uncached_aliases], return_exceptions=True),
+                    timeout=3.0
+                )
+                any_on = any(r is True for r in results)
+            except asyncio.TimeoutError:
+                # On timeout, assume off (better UX than hanging)
+                any_on = False
 
     await log_event("room_toggle_state", request, {"room": room.name, "any_on": any_on})
 
