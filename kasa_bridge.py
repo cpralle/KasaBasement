@@ -655,11 +655,7 @@ async def execute_scene(scene: Scene) -> dict:
                     try:
                         p = dict(action.params or {})
                         if "brightness" not in p or p.get("brightness") is None:
-                            # Ensure we have fresh data before reading brightness
-                            try:
-                                await device.update()
-                            except Exception:
-                                pass
+                            # resolve_device_for_config already called update(), state is fresh
                             state = read_light_state(device) or {}
                             current_brightness = state.get("brightness")
                             if current_brightness is not None:
@@ -675,7 +671,7 @@ async def execute_scene(scene: Scene) -> dict:
                         pass
 
                 if action.action == "toggle":
-                    await toggle_device_power(device)
+                    await toggle_device_power(device, skip_update=True)  # resolve_device_for_config already updated
                 elif action.action == "on":
                     await device.turn_on()
                 elif action.action == "off":
@@ -716,13 +712,9 @@ async def execute_scene(scene: Scene) -> dict:
                             applied_brightness_via_hsv = True
                         else:
                             # Preserve current brightness when applying color-only.
+                            # resolve_device_for_config already called update(), state is fresh
                             current_brightness = None
                             try:
-                                # Ensure we have fresh data before reading brightness, but don't fail the scene if update breaks.
-                                try:
-                                    await device.update()
-                                except Exception:
-                                    pass
                                 state = read_light_state(device) or {}
                                 if isinstance(state, dict):
                                     current_brightness = state.get("brightness")
@@ -952,13 +944,7 @@ async def is_scene_any_device_on(scene: Scene) -> bool:
             device, _source = await resolve_device_for_config(dev_cfg, mac_to_device)
             if not device:
                 return False
-            # Use a very short timeout for state checks to avoid blocking button presses
-            # Skip update if we just connected (device might have stale state, but that's ok for toggle)
-            try:
-                await asyncio.wait_for(device.update(), timeout=0.3)
-            except (asyncio.TimeoutError, Exception):
-                # If update times out or fails, assume off to avoid blocking
-                return False
+            # resolve_device_for_config already calls update(), so state is fresh
             return bool(read_device_is_on(device))
         except Exception:
             return False
@@ -989,10 +975,7 @@ async def is_scene_representative_on(scene: Scene) -> bool:
             device, _source = await resolve_device_for_config(dev_cfg, mac_to_device)
             if not device:
                 continue
-            try:
-                await asyncio.wait_for(device.update(), timeout=0.5)
-            except (asyncio.TimeoutError, Exception):
-                continue
+            # resolve_device_for_config already calls update(), so state is fresh
             return bool(read_device_is_on(device))
         except Exception:
             continue
@@ -1193,12 +1176,16 @@ def infer_config_device_type(device: IotDevice) -> str:
 
     return "plug"
 
-async def toggle_device_power(device: IotDevice):
+async def toggle_device_power(device: IotDevice, *, skip_update: bool = False):
     """
     Toggle device power in a way that works across python-kasa device/module APIs.
     Some devices don't implement device.toggle(); prefer reading is_on + turn_on/off.
+
+    Args:
+        skip_update: If True, skip the device.update() call (use when device state is already fresh)
     """
-    await device.update()
+    if not skip_update:
+        await device.update()
 
     # Prefer device-level is_on + turn_on/off
     try:
@@ -1673,7 +1660,7 @@ async def api_set_device(mac: str, request: Request):
         elif power == "off":
             await device.turn_off()
         elif power == "toggle":
-            await toggle_device_power(device)
+            await toggle_device_power(device, skip_update=True)  # already updated above
 
         # Bulb-only settings
         if str(dev_cfg.type).lower() == "bulb":
@@ -2210,7 +2197,7 @@ async def api_test_device(device_idx: int, action: str = Form(...), brightness: 
         elif action == "off":
             await device.turn_off()
         elif action == "toggle":
-            await toggle_device_power(device)
+            await toggle_device_power(device, skip_update=True)  # already updated above
         else:
             raise HTTPException(status_code=400, detail="Invalid action")
 
