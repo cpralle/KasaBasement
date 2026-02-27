@@ -14,6 +14,11 @@ This document contains step-by-step instructions for building and deploying Kasa
    ```powershell
    cd "C:\Users\chadp\OneDrive\python onedrive stuff\KasaBasement"
    ```
+   or
+
+   ```powershell
+   cd "D:\OneDrive\python onedrive stuff\KasaBasement"
+   ```
 
 2. **Make sure Docker Desktop is running** (check system tray for Docker icon)
 

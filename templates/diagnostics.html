@@ -139,20 +139,42 @@
     }
 
     let cachedEvents = [];
-    async function copyEvents() {
+    function copyEvents() {
         const btn = document.getElementById('copyBtn');
-        try {
-            const text = cachedEvents.map(e => {
-                const details = e.details ? JSON.stringify(e.details) : '{}';
-                return `${e.ts || ''} ${e.type || ''} ${e.client || ''} ${e.path || ''}\n${details}`;
-            }).join('\n');
-            await navigator.clipboard.writeText(text);
-            btn.textContent = 'Copied!';
-            setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-        } catch (e) {
-            btn.textContent = 'Failed';
-            setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        const text = cachedEvents.map(e => {
+            const details = e.details ? JSON.stringify(e.details) : '{}';
+            return `${e.ts || ''} ${e.type || ''} ${e.client || ''} ${e.path || ''}\n${details}`;
+        }).join('\n');
+
+        // Try clipboard API first, fall back to textarea method
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+            }).catch(() => fallbackCopy(text, btn));
+        } else {
+            fallbackCopy(text, btn);
         }
+    }
+
+    function fallbackCopy(text, btn) {
+        // Create temporary textarea for copying
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+            document.execCommand('copy');
+            btn.textContent = 'Copied!';
+        } catch (e) {
+            // Last resort: show in prompt
+            prompt('Copy this text:', text);
+            btn.textContent = 'Copy';
+        }
+        document.body.removeChild(ta);
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
     }
 
     refreshEvents();

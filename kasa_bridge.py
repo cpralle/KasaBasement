@@ -1063,6 +1063,12 @@ async def run_routine(routine_idx: int) -> dict:
             actions = [SceneAction(device_alias=a, action=act.group_action, params=None) for a in aliases]
             virtual = Scene(name=f"{r.name}:{room.name}:{act.group_action}", actions=actions)
             res = await execute_scene(virtual)
+            # Update room state for group actions (virtual scenes don't exist in config.scenes,
+            # so execute_scene won't update active_scene). This ensures toggle works correctly
+            # after routines run.
+            if act.group_action == "off":
+                room.active_scene = None
+                save_config(config)
             results.append({"kind": "group", "room": room.name, "action": act.group_action, "status": "success", "result": res})
         else:
             results.append({"kind": act.kind, "status": "error", "message": "Unknown action kind"})
@@ -1523,6 +1529,24 @@ async def resolve_device_for_config(
             async with _device_cache_lock:
                 _device_connection_cache[mac_norm] = (dev, datetime.now(timezone.utc))
             return dev, "mac"
+
+    # Fallback: broadcast discovery when host connect failed and mac_to_device is empty
+    # This handles cold-start scenarios (overnight idle, first action after reboot)
+    try:
+        discovered = await kasa_discover(timeout=KASA_SCENE_DISCOVERY_TIMEOUT)
+        for dev in discovered.values():
+            try:
+                await dev.update()
+            except Exception:
+                pass
+            dev_mac = getattr(dev, "mac", None)
+            if dev_mac and normalize_mac(dev_mac) == mac_norm:
+                if getattr(dev, "modules", None) is not None:
+                    async with _device_cache_lock:
+                        _device_connection_cache[mac_norm] = (dev, datetime.now(timezone.utc))
+                    return dev, "broadcast_fallback"
+    except Exception:
+        pass
 
     return None, "mac"
 
