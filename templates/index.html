@@ -50,13 +50,22 @@ Settings
         {% else %}
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {% for scene in visible_scenes %}
-            <button 
+            {% set room_state = scene_room_state.get(scene.name, {}) %}
+            {% set is_active = room_state.get('is_on') and room_state.get('active_scene', '')|lower == scene.name|lower %}
+            <button
                 onclick="runSceneByName('{{ scene.name|e }}', this)"
-                class="scene-card bg-slate-800 hover:bg-slate-700 p-6 rounded-2xl shadow-md border border-slate-700 text-left"
+                class="scene-card p-6 rounded-2xl shadow-md text-left {{ 'bg-green-900/50 border-green-600 hover:bg-green-800/50' if is_active else 'bg-slate-800 hover:bg-slate-700 border-slate-700' }} border"
+                data-scene-name="{{ scene.name|e }}"
             >
-                <h3 class="text-lg font-bold mb-2">{{ scene.name }}</h3>
+                <div class="flex items-center gap-2 mb-2">
+                    <h3 class="text-lg font-bold">{{ scene.name }}</h3>
+                    {% if is_active %}
+                    <span class="text-xs bg-green-600 text-white px-2 py-0.5 rounded-full">ON</span>
+                    {% endif %}
+                </div>
                 <p class="text-sm text-slate-400">
                     {{ scene.actions|length }} action{{ 's' if scene.actions|length != 1 else '' }}
+                    {% if is_active %}<span class="ml-2 text-green-400">· Click to turn off</span>{% endif %}
                 </p>
                 <p class="mt-3 text-xs text-slate-500 font-mono">
                     Triggers: {{ scene.name }}_toggle · {{ scene.name }}_d1 · {{ scene.name }}_d2 · {{ scene.name }}_d3 · {{ scene.name }}_d4
@@ -120,6 +129,9 @@ Settings
 </main>
 
 <script>
+    // Room state for each scene (is_on, active_scene) - used for toggle-off on active scene click
+    const sceneRoomState = {{ scene_room_state | tojson }};
+
     function escapeHtml(text) {
         const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
         return String(text).replace(/[&<>"']/g, m => map[m]);
@@ -351,15 +363,92 @@ Settings
             btnEl.classList.add('opacity-70');
         }
         try {
-            // Dashboard behavior: always SET the selected scene (never toggle-off).
-            // (Toggle behavior can be triggered via the explicit *_toggle endpoint when desired.)
-            const response = await fetch(`/api/trigger/scene/${encodeURIComponent(sceneName)}`, { method: 'GET' });
+            // Check if this scene is currently active and the room is on
+            // If so, use the toggle endpoint to turn off instead of re-triggering
+            const roomState = sceneRoomState[sceneName];
+            const isActiveAndOn = roomState &&
+                roomState.is_on === true &&
+                roomState.active_scene &&
+                roomState.active_scene.toLowerCase() === sceneName.toLowerCase();
+
+            let url;
+            if (isActiveAndOn) {
+                // Scene is active and on - toggle off
+                url = `/api/trigger/scene/${encodeURIComponent(sceneName)}_toggle`;
+            } else {
+                // Scene is not active or room is off - trigger the scene
+                url = `/api/trigger/scene/${encodeURIComponent(sceneName)}`;
+            }
+
+            const response = await fetch(url, { method: 'GET' });
             // Results are now shown on the Diagnostics page (Last Scene Run).
             // Keep dashboard lightweight: just flash the button on success/failure.
             if (btnEl) {
                 btnEl.classList.remove('ring-2', 'ring-green-500', 'ring-red-500');
                 btnEl.classList.add('ring-2', response.ok ? 'ring-green-500' : 'ring-red-500');
                 setTimeout(() => btnEl.classList.remove('ring-2', 'ring-green-500', 'ring-red-500'), 900);
+            }
+
+            // Update local state and visuals for ALL scenes in the same room
+            if (response.ok && sceneRoomState[sceneName]) {
+                const roomIdx = sceneRoomState[sceneName].room_idx;
+                const newIsOn = !isActiveAndOn; // If was on, now off. If was off/different, now on.
+                const newActiveScene = isActiveAndOn ? sceneRoomState[sceneName].active_scene : sceneName;
+
+                // Update all scenes in the same room
+                for (const [sName, sState] of Object.entries(sceneRoomState)) {
+                    if (sState.room_idx === roomIdx) {
+                        sState.is_on = newIsOn;
+                        if (!isActiveAndOn) {
+                            sState.active_scene = sceneName;
+                        }
+                    }
+                }
+
+                // Update visuals for all scene cards in the same room
+                document.querySelectorAll('[data-scene-name]').forEach(card => {
+                    const cardSceneName = card.getAttribute('data-scene-name');
+                    const cardState = sceneRoomState[cardSceneName];
+                    if (!cardState || cardState.room_idx !== roomIdx) return;
+
+                    const isThisActive = cardState.is_on &&
+                        cardState.active_scene &&
+                        cardState.active_scene.toLowerCase() === cardSceneName.toLowerCase();
+
+                    // Remove all state classes first
+                    card.classList.remove('bg-green-900/50', 'border-green-600', 'hover:bg-green-800/50',
+                                          'bg-slate-800', 'hover:bg-slate-700', 'border-slate-700');
+
+                    // Remove existing badge and hint
+                    const badge = card.querySelector('span.bg-green-600');
+                    if (badge) badge.remove();
+                    const hint = card.querySelector('span.text-green-400');
+                    if (hint) hint.remove();
+
+                    if (isThisActive) {
+                        // This scene is now active
+                        card.classList.add('bg-green-900/50', 'border-green-600', 'hover:bg-green-800/50');
+                        // Add badge
+                        const titleEl = card.querySelector('h3');
+                        if (titleEl && !card.querySelector('span.bg-green-600')) {
+                            const newBadge = document.createElement('span');
+                            newBadge.className = 'text-xs bg-green-600 text-white px-2 py-0.5 rounded-full';
+                            newBadge.textContent = 'ON';
+                            titleEl.parentNode.appendChild(newBadge);
+                        }
+                        // Add hint
+                        const actionP = card.querySelectorAll('p')[0];
+                        if (actionP && !card.querySelector('span.text-green-400')) {
+                            const newHint = document.createElement('span');
+                            newHint.className = 'ml-2 text-green-400';
+                            newHint.textContent = '· Click to turn off';
+                            actionP.appendChild(newHint);
+                        }
+                    } else {
+                        // This scene is inactive
+                        card.classList.add('bg-slate-800', 'hover:bg-slate-700', 'border-slate-700');
+                    }
+                });
             }
         } catch (err) {
             if (btnEl) {

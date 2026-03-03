@@ -69,10 +69,11 @@ class Room(BaseModel):
     rows: int = 8
     cols: int = 8
     grid_map: Optional[List[Optional[SceneAction]]] = None
-    # Remember last active *base* scene for this room (e.g. "Scene2", not "Scene2_d1")
-    # None means room is currently off
+    # Whether the room's lights are currently on or off
+    is_on: bool = False
+    # The selected scene for this room (persists even when lights are off)
     active_scene: Optional[str] = None
-    # Remember the last scene that was ON (persists across off cycles for toggle restore)
+    # Remember the last scene that was ON (legacy, kept for compatibility)
     last_on_scene: Optional[str] = None
     # Remember last dim level requested for this room via /api/<room>/dimming_d1..d4
     # Used so /api/<room>/cycle can respect the current dial position.
@@ -616,24 +617,32 @@ async def _record_last_scene_run(*, request: Request, trigger: str, scene_name: 
         {"trigger": trigger, "scene_name": scene_name, "error": error, "summary": entry["summary"]},
     )
 
-async def execute_scene(scene: Scene) -> dict:
+async def execute_scene(scene: Scene, update_room_state: bool = True) -> dict:
     """
     Core scene execution logic used by dashboard + external triggers.
     Returns the same shape the dashboard expects: {status, scene, results}.
+
+    Args:
+        scene: The scene to execute
+        update_room_state: If True, update room's active_scene and is_on. Set to False
+                          for virtual scenes (like toggle:off) that shouldn't change room state.
     """
     async with scene_execution_lock:
         # If this scene (or its dim variant) corresponds to a configured scene mapped to a room,
         # remember it as the room's active base scene so room dimming endpoints can work.
-        try:
-            base_name, _suffix = parse_dim_suffix(scene.name)
-            base_scene = next((s for s in config.scenes if s.name.lower() == base_name.lower()), None)
-            if base_scene and base_scene.room_idx is not None:
-                if 0 <= base_scene.room_idx < len(config.rooms):
-                    config.rooms[base_scene.room_idx].active_scene = base_scene.name
-                    config.rooms[base_scene.room_idx].last_on_scene = base_scene.name
-                    save_config(config)
-        except Exception:
-            pass
+        if update_room_state:
+            try:
+                base_name, _suffix = parse_dim_suffix(scene.name)
+                base_scene = next((s for s in config.scenes if s.name.lower() == base_name.lower()), None)
+                if base_scene and base_scene.room_idx is not None:
+                    if 0 <= base_scene.room_idx < len(config.rooms):
+                        room = config.rooms[base_scene.room_idx]
+                        room.active_scene = base_scene.name
+                        room.last_on_scene = base_scene.name
+                        room.is_on = True
+                        save_config(config)
+            except Exception:
+                pass
 
         # Broadcast target immediately so maps can update optimistically.
         await publish_sse("scene_target", {"scene": scene.name, "actions": [a.model_dump() for a in scene.actions]})
@@ -992,53 +1001,12 @@ async def is_scene_any_device_on(scene: Scene) -> bool:
         return False
 
 
-async def is_scene_representative_on(scene: Scene) -> bool:
-    """
-    Fast heuristic for toggle: assume the scene's devices generally move together and
-    check only ONE representative device (first configured action device we can resolve).
-    This avoids N device updates on every button press.
-
-    If external state was recently notified via /api/notify/*, uses that cached state
-    instead of querying the device (much faster and avoids WiFi latency).
-    """
-    alias_to_cfg = {d.alias: d for d in config.devices}
-    now = time.time()
-
-    # First, check if we have recent notified state for any device in this scene
-    # If so, trust it (external system told us the state)
-    async with _device_state_cache_lock:
-        for a in scene.actions:
-            dev_cfg = alias_to_cfg.get(a.device_alias)
-            if not dev_cfg:
-                continue
-            mac = normalize_mac(dev_cfg.mac)
-            cached = _device_state_cache.get(mac)
-            if cached and (now - cached["ts"]) < DEVICE_STATE_CACHE_TTL:
-                # Found fresh cached state - trust it
-                return cached["is_on"]
-
-    # No fresh cached state - query device directly
-    mac_to_device: dict[str, IotDevice] = {}
-    for a in scene.actions:
-        dev_cfg = alias_to_cfg.get(a.device_alias)
-        if not dev_cfg:
-            continue
-        try:
-            device, _source = await resolve_device_for_config(dev_cfg, mac_to_device)
-            if not device:
-                continue
-            # resolve_device_for_config already calls update(), so state is fresh
-            return bool(read_device_is_on(device))
-        except Exception:
-            continue
-
-    return False
-
 async def run_routine(routine_idx: int) -> dict:
     """Execute a routine (manual or scheduled)."""
     if routine_idx < 0 or routine_idx >= len(config.routines):
         raise HTTPException(status_code=404, detail="Routine not found")
     r = config.routines[routine_idx]
+    await log_event("routine_start", None, {"routine": r.name, "routine_idx": routine_idx}, client="scheduler", path="/routine")
     results: list[dict] = []
     for act in r.actions:
         if act.kind == "scene":
@@ -1049,8 +1017,34 @@ async def run_routine(routine_idx: int) -> dict:
             if not scene:
                 results.append({"kind": "scene", "status": "error", "message": f"Scene not found: {act.scene_name}"})
                 continue
-            res = await execute_scene(scene)
-            results.append({"kind": "scene", "scene": act.scene_name, "status": "success", "result": res})
+            # Find the room for this scene to check is_on state
+            room = None
+            if scene.room_idx is not None and 0 <= scene.room_idx < len(config.rooms):
+                room = config.rooms[scene.room_idx]
+            # Scene actions only change the stored scene selection.
+            # If room is ON: also execute the scene physically.
+            # If room is OFF: only update active_scene (no physical change).
+            room_is_on = room.is_on if room else False
+            await log_event("routine_scene_action", None, {
+                "routine": r.name,
+                "scene": act.scene_name,
+                "room": room.name if room else None,
+                "room_is_on": room_is_on,
+            }, client="scheduler", path="/routine")
+            if room_is_on:
+                # Room is on - execute scene (this also updates active_scene)
+                res = await execute_scene(scene)
+                results.append({"kind": "scene", "scene": act.scene_name, "status": "success", "executed": True, "result": res})
+            else:
+                # Room is off (or no room) - only update active_scene, don't execute
+                # Get base scene name (strip _d1/_d2/_d3/_d4 suffix if present)
+                base_name, _ = parse_dim_suffix(scene.name)
+                base_scene = next((s for s in config.scenes if s.name.lower() == base_name.lower()), None)
+                if room and base_scene:
+                    room.active_scene = base_scene.name
+                    room.last_on_scene = base_scene.name
+                    save_config(config)
+                results.append({"kind": "scene", "scene": act.scene_name, "status": "success", "executed": False, "message": "Room is off, only updated active_scene"})
         elif act.kind == "group":
             if act.room_idx is None or act.room_idx < 0 or act.room_idx >= len(config.rooms):
                 results.append({"kind": "group", "status": "error", "message": "Invalid room"})
@@ -1060,22 +1054,60 @@ async def run_routine(routine_idx: int) -> dict:
                 continue
             room = config.rooms[act.room_idx]
             aliases = _room_device_aliases(room)
-            actions = [SceneAction(device_alias=a, action=act.group_action, params=None) for a in aliases]
-            virtual = Scene(name=f"{r.name}:{room.name}:{act.group_action}", actions=actions)
-            res = await execute_scene(virtual)
-            # Update room state for group actions (virtual scenes don't exist in config.scenes,
-            # so execute_scene won't update active_scene). This ensures toggle works correctly
-            # after routines run.
+
             if act.group_action == "off":
-                room.active_scene = None
+                # Turn off all devices
+                actions = [SceneAction(device_alias=a, action="off", params=None) for a in aliases]
+                virtual = Scene(name=f"{r.name}:{room.name}:off", actions=actions)
+                res = await execute_scene(virtual, update_room_state=False)
+                room.is_on = False
                 save_config(config)
-            results.append({"kind": "group", "room": room.name, "action": act.group_action, "status": "success", "result": res})
+                results.append({"kind": "group", "room": room.name, "action": "off", "status": "success", "result": res})
+
+            elif act.group_action == "on":
+                # Execute the active_scene (always set)
+                scene = next((s for s in config.scenes if s.name.lower() == room.active_scene.lower()), None) if room.active_scene else None
+                if scene:
+                    res = await execute_scene(scene)
+                    results.append({"kind": "group", "room": room.name, "action": "on", "scene": scene.name, "status": "success", "result": res})
+                else:
+                    # Fallback if somehow no active_scene
+                    actions = [SceneAction(device_alias=a, action="on", params=None) for a in aliases]
+                    virtual = Scene(name=f"{r.name}:{room.name}:on", actions=actions)
+                    res = await execute_scene(virtual, update_room_state=False)
+                    room.is_on = True
+                    save_config(config)
+                    results.append({"kind": "group", "room": room.name, "action": "on", "status": "success", "result": res})
+
+            elif act.group_action == "toggle":
+                if room.is_on:
+                    # Turn off
+                    actions = [SceneAction(device_alias=a, action="off", params=None) for a in aliases]
+                    virtual = Scene(name=f"{r.name}:{room.name}:off", actions=actions)
+                    res = await execute_scene(virtual, update_room_state=False)
+                    room.is_on = False
+                    save_config(config)
+                    results.append({"kind": "group", "room": room.name, "action": "toggle->off", "status": "success", "result": res})
+                else:
+                    # Turn on via active_scene
+                    scene = next((s for s in config.scenes if s.name.lower() == room.active_scene.lower()), None) if room.active_scene else None
+                    if scene:
+                        res = await execute_scene(scene)
+                        results.append({"kind": "group", "room": room.name, "action": "toggle->on", "scene": scene.name, "status": "success", "result": res})
+                    else:
+                        actions = [SceneAction(device_alias=a, action="on", params=None) for a in aliases]
+                        virtual = Scene(name=f"{r.name}:{room.name}:on", actions=actions)
+                        res = await execute_scene(virtual, update_room_state=False)
+                        room.is_on = True
+                        save_config(config)
+                        results.append({"kind": "group", "room": room.name, "action": "toggle->on", "status": "success", "result": res})
         else:
             results.append({"kind": act.kind, "status": "error", "message": "Unknown action kind"})
 
     # mark last run date (local)
     r.last_run_date = datetime.now().date().isoformat()
     save_config(config)
+    await log_event("routine_complete", None, {"routine": r.name, "results": results}, client="scheduler", path="/routine")
     await publish_sse("routine_run", {"routine": r.name, "results": results})
     return {"status": "success", "routine": r.name, "results": results}
 
@@ -1597,12 +1629,23 @@ async def index(request: Request):
     # Sort devices alphabetically by alias
     sorted_devices = sorted(config.devices, key=lambda d: d.alias.lower())
     visible_scenes = [s for s in config.scenes if is_visible_scene(s)]
+    # Build room state info for each scene (for toggle-off on active scene click)
+    # Include room_idx so frontend can update all scenes in the same room
+    scene_room_state = {}
+    for scene in visible_scenes:
+        if scene.room_idx is not None and 0 <= scene.room_idx < len(config.rooms):
+            room = config.rooms[scene.room_idx]
+            scene_room_state[scene.name] = {
+                "room_idx": scene.room_idx,
+                "is_on": room.is_on,
+                "active_scene": room.active_scene,
+            }
     return templates.TemplateResponse("index.html", {
         "request": request,
         "config": config,
-        "sorted_devices": sorted_devices
-        ,
-        "visible_scenes": visible_scenes
+        "sorted_devices": sorted_devices,
+        "visible_scenes": visible_scenes,
+        "scene_room_state": scene_room_state,
     })
 
 @app.get("/diagnostics", response_class=HTMLResponse)
@@ -1977,9 +2020,12 @@ async def api_trigger_scene_get(
         base_scene = next((s for s in config.scenes if s.name.lower() == base_name_toggle.lower()), None)
         if not base_scene:
             raise HTTPException(status_code=404, detail="Scene not found")
-        # Heuristic: check only one representative device for speed/stability.
-        any_on = await is_scene_representative_on(base_scene)
-        await log_event("scene_toggle_state", request, {"scene": base_scene.name, "any_on": any_on})
+        # Check room's is_on state (no device query needed)
+        room = None
+        if base_scene.room_idx is not None and 0 <= base_scene.room_idx < len(config.rooms):
+            room = config.rooms[base_scene.room_idx]
+        any_on = room.is_on if room else False
+        await log_event("scene_toggle_state", request, {"scene": base_scene.name, "any_on": any_on, "is_on": room.is_on if room else None})
         if any_on:
             # Turn off all devices referenced by the scene
             off_actions = [SceneAction(device_alias=a.device_alias, action="off", params=None) for a in base_scene.actions]
@@ -1989,14 +2035,12 @@ async def api_trigger_scene_get(
                 room_idx=base_scene.room_idx,
                 dim_profile=base_scene.dim_profile,
             )
-            # Save and clear active scene for the room when toggling off
-            if base_scene.room_idx is not None and 0 <= base_scene.room_idx < len(config.rooms):
-                room = config.rooms[base_scene.room_idx]
-                if room.active_scene:
-                    room.last_on_scene = room.active_scene
-                room.active_scene = None
+            # Mark room as off (keep active_scene unchanged - it's the selected scene)
+            if room:
+                room.is_on = False
+                save_config(config)
         else:
-            # Off -> set scene (full scene brightness, i.e., base scene)
+            # Off -> turn on with this scene
             run_scene = base_scene
     else:
         base_name, suffix = parse_dim_suffix(scene_name)
@@ -2033,9 +2077,12 @@ async def api_trigger_scene_post(request: Request, scene_name: str, token: Optio
         base_scene = next((s for s in config.scenes if s.name.lower() == base_name_toggle.lower()), None)
         if not base_scene:
             raise HTTPException(status_code=404, detail="Scene not found")
-        # Heuristic: check only one representative device for speed/stability.
-        any_on = await is_scene_representative_on(base_scene)
-        await log_event("scene_toggle_state", request, {"scene": base_scene.name, "any_on": any_on})
+        # Check room's is_on state (no device query needed)
+        room = None
+        if base_scene.room_idx is not None and 0 <= base_scene.room_idx < len(config.rooms):
+            room = config.rooms[base_scene.room_idx]
+        any_on = room.is_on if room else False
+        await log_event("scene_toggle_state", request, {"scene": base_scene.name, "any_on": any_on, "is_on": room.is_on if room else None})
         if any_on:
             off_actions = [SceneAction(device_alias=a.device_alias, action="off", params=None) for a in base_scene.actions]
             run_scene = Scene(
@@ -2044,12 +2091,12 @@ async def api_trigger_scene_post(request: Request, scene_name: str, token: Optio
                 room_idx=base_scene.room_idx,
                 dim_profile=base_scene.dim_profile,
             )
-            if base_scene.room_idx is not None and 0 <= base_scene.room_idx < len(config.rooms):
-                room = config.rooms[base_scene.room_idx]
-                if room.active_scene:
-                    room.last_on_scene = room.active_scene
-                room.active_scene = None
+            # Mark room as off (keep active_scene unchanged - it's the selected scene)
+            if room:
+                room.is_on = False
+                save_config(config)
         else:
+            # Off -> turn on with this scene
             run_scene = base_scene
     else:
         base_name, suffix = parse_dim_suffix(scene_name)
@@ -2183,9 +2230,9 @@ async def api_room_toggle_post(request: Request, room_name: str, token: Optional
 async def _run_room_toggle(request: Request, room_name: str) -> dict:
     """
     Room-level on/off toggle.
-    - Check state of devices in the room (uses cache if available, else queries)
-    - If any on: turn all off and clear active_scene
-    - If all off: restore last active scene or first mapped scene
+    - Check state of devices in the room (uses cache if available, else room.is_on)
+    - If on: turn all off and set is_on=False (keep active_scene unchanged)
+    - If off: turn on using active_scene (or fall back to first mapped scene)
     """
     room_idx, room = _get_room_by_name(room_name)
     mapped = _get_base_scenes_for_room(room_idx)
@@ -2203,7 +2250,7 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
     if not room_device_aliases:
         raise HTTPException(status_code=409, detail="No devices found in room scenes")
 
-    # Check if room is on: use cache if fresh, otherwise trust active_scene
+    # Check if room is on: use cache if fresh, otherwise trust room.is_on
     # This is fast - no device queries (those are slow over WiFi)
     now = time.time()
     any_on = False
@@ -2223,12 +2270,11 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
                     any_on = True
                     break  # Found one on, that's enough
 
-    # If no fresh cache, trust active_scene (set by kasabasement when scenes run)
-    # active_scene is None when room was turned off, set when a scene runs
+    # If no fresh cache, trust room.is_on (tracks on/off state separately from scene)
     if not found_fresh_cache:
-        any_on = room.active_scene is not None
+        any_on = room.is_on
 
-    await log_event("room_toggle_state", request, {"room": room.name, "any_on": any_on})
+    await log_event("room_toggle_state", request, {"room": room.name, "any_on": any_on, "is_on": room.is_on, "active_scene": room.active_scene})
 
     if any_on:
         # Turn all devices in the room OFF
@@ -2238,19 +2284,17 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
             actions=off_actions,
             room_idx=room_idx,
         )
-        res = await execute_scene(off_scene)
-        # Remember current scene for later restore, then mark room as off
-        if room.active_scene:
-            room.last_on_scene = room.active_scene
-        room.active_scene = None
+        res = await execute_scene(off_scene, update_room_state=False)
+        # Mark room as off (keep active_scene unchanged - it's the selected scene)
+        room.is_on = False
         save_config(config)
         await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=off_scene.name, res=res)
         return {"status": "success", "action": "off", "room": room.name, "results": res.get("results", [])}
     else:
-        # Turn ON: restore last scene that was on (or fall back to first mapped scene)
+        # Turn ON: use active_scene (or fall back to first mapped scene)
         on_scene = None
-        if room.last_on_scene:
-            on_scene = next((s for s in mapped if s.name.lower() == room.last_on_scene.lower()), None)
+        if room.active_scene:
+            on_scene = next((s for s in mapped if s.name.lower() == room.active_scene.lower()), None)
         if not on_scene:
             on_scene = mapped[0]
         res = await execute_scene(on_scene)
@@ -2269,12 +2313,6 @@ async def _run_room_cycle(request: Request, room_name: str) -> dict:
     mapped = _get_base_scenes_for_room(room_idx)
     if not mapped:
         raise HTTPException(status_code=409, detail="No scenes mapped to this room")
-
-    # Ignore cycle commands when lights are off (active_scene is None)
-    # This prevents accidental scene changes from button presses when room is dark
-    if room.active_scene is None:
-        await log_event("room_cycle_ignored", request, {"room": room.name, "reason": "lights_off"})
-        return {"status": "ignored", "room": room.name, "reason": "Lights are off - cycle ignored"}
 
     # Initialize per-room debounce state if needed
     if room_idx not in _room_cycle_state:
@@ -2336,6 +2374,7 @@ async def _run_room_cycle(request: Request, room_name: str) -> dict:
                 {
                     "room": room.name,
                     "room_idx": room_idx,
+                    "is_on": room.is_on,
                     "active_scene": room.active_scene,
                     "active_dim": getattr(room, "active_dim", None),
                     "mapped_scenes": names,
@@ -2345,25 +2384,29 @@ async def _run_room_cycle(request: Request, room_name: str) -> dict:
                 },
             )
 
-        # Execute the final scene
-        res = await execute_scene(run_scene)
-        try:
-            results = res.get("results") or []
-            ok = sum(1 for r in results if r.get("status") == "success")
-            err = sum(1 for r in results if r.get("status") == "error")
-            sample_errors = [
-                {"device": r.get("device"), "message": r.get("message")}
-                for r in results
-                if r.get("status") == "error"
-            ][:5]
-            await log_event(
-                "room_cycle_result",
-                request,
-                {"room": room.name, "scene": chosen.name, "device_success": ok, "device_error": err, "sample_errors": sample_errors},
-            )
-        except Exception:
-            pass
-        return res
+        # Only physically execute the scene if lights are on
+        if room.is_on:
+            res = await execute_scene(run_scene)
+            try:
+                results = res.get("results") or []
+                ok = sum(1 for r in results if r.get("status") == "success")
+                err = sum(1 for r in results if r.get("status") == "error")
+                sample_errors = [
+                    {"device": r.get("device"), "message": r.get("message")}
+                    for r in results
+                    if r.get("status") == "error"
+                ][:5]
+                await log_event(
+                    "room_cycle_result",
+                    request,
+                    {"room": room.name, "scene": chosen.name, "device_success": ok, "device_error": err, "sample_errors": sample_errors},
+                )
+            except Exception:
+                pass
+            return res
+        else:
+            # Lights are off - scene selection updated but no physical change
+            return {"status": "success", "scene": chosen.name, "room": room.name, "lights_off": True, "message": "Scene selected (lights are off)"}
     finally:
         async with state["lock"]:
             state["executing"] = False
@@ -2848,8 +2891,34 @@ async def delete_scene(scene_idx: int):
     """Delete a scene."""
     if scene_idx < 0 or scene_idx >= len(config.scenes):
         raise HTTPException(status_code=404, detail="Scene not found")
-    
+
     config.scenes.pop(scene_idx)
+    save_config(config)
+    return RedirectResponse(url="/scenes", status_code=303)
+
+@app.post("/move-scene-up/{scene_idx}")
+async def move_scene_up(scene_idx: int):
+    """Move a scene up in the list (earlier in cycle order)."""
+    if scene_idx < 0 or scene_idx >= len(config.scenes):
+        raise HTTPException(status_code=404, detail="Scene not found")
+    if scene_idx == 0:
+        # Already at top, no-op
+        return RedirectResponse(url="/scenes", status_code=303)
+    # Swap with previous scene
+    config.scenes[scene_idx], config.scenes[scene_idx - 1] = config.scenes[scene_idx - 1], config.scenes[scene_idx]
+    save_config(config)
+    return RedirectResponse(url="/scenes", status_code=303)
+
+@app.post("/move-scene-down/{scene_idx}")
+async def move_scene_down(scene_idx: int):
+    """Move a scene down in the list (later in cycle order)."""
+    if scene_idx < 0 or scene_idx >= len(config.scenes):
+        raise HTTPException(status_code=404, detail="Scene not found")
+    if scene_idx >= len(config.scenes) - 1:
+        # Already at bottom, no-op
+        return RedirectResponse(url="/scenes", status_code=303)
+    # Swap with next scene
+    config.scenes[scene_idx], config.scenes[scene_idx + 1] = config.scenes[scene_idx + 1], config.scenes[scene_idx]
     save_config(config)
     return RedirectResponse(url="/scenes", status_code=303)
 
