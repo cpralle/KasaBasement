@@ -30,6 +30,68 @@ This includes:
 - Setting up systemd for auto-start
 - Troubleshooting common issues
 
+### One-Command Deploy (Windows PowerShell)
+
+This repo includes a deploy helper that builds then deploys over SSH/SCP:
+
+```powershell
+.\deploy_raspberry_pi.ps1
+```
+
+Useful options:
+
+```powershell
+# Preview commands without executing
+.\deploy_raspberry_pi.ps1 -DryRun
+
+# Deploy an already-built artifact
+.\deploy_raspberry_pi.ps1 -SkipBuild
+
+# Override host/user/service/remote dir
+.\deploy_raspberry_pi.ps1 -PiHost KasaBasementPi.local -PiUser cpralle -RemoteDir ~/KasaBasement -ServiceName kasabasement
+
+# Use a specific SSH private key (non-interactive)
+.\deploy_raspberry_pi.ps1 -PiHost 192.168.1.37 -PiUser cpralle -SshKeyPath "$env:USERPROFILE\secrets\kasabridge_deployKey"
+```
+
+### Passwordless Deployment Setup (One-Time)
+
+If you want build+deploy to run without any password prompts:
+
+1. Generate a key on Windows:
+```powershell
+ssh-keygen -t ed25519 -C "kasabasement-deploy"
+```
+
+2. Install public key on the Pi (one-time password prompt for this step):
+```powershell
+Get-Content "$env:USERPROFILE\secrets\kasabridge_deployKey.pub" | ssh cpralle@192.168.1.37 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+```
+
+3. Verify key login works:
+```powershell
+ssh -i "$env:USERPROFILE\secrets\kasabridge_deployKey" cpralle@192.168.1.37 "echo SSH key works"
+```
+
+4. On the Pi, allow passwordless `systemctl` commands for deploy user:
+```bash
+sudo visudo -f /etc/sudoers.d/kasabasement-deploy
+```
+Add:
+```text
+cpralle ALL=(root) NOPASSWD: /bin/systemctl stop kasabasement, /bin/systemctl start kasabasement, /bin/systemctl status kasabasement, /bin/systemctl daemon-reload
+```
+Then validate:
+```bash
+sudo chmod 440 /etc/sudoers.d/kasabasement-deploy
+sudo visudo -cf /etc/sudoers.d/kasabasement-deploy
+```
+
+5. Deploy with key:
+```powershell
+.\deploy_raspberry_pi.ps1 -PiHost 192.168.1.37 -PiUser cpralle -SshKeyPath "$env:USERPROFILE\secrets\kasabridge_deployKey"
+```
+
 ### Building Executables
 
 #### Windows
@@ -157,6 +219,34 @@ This method uses Docker Desktop to build an ARM executable on your Windows PC, w
 - `SCENE_TRIGGER_TOKEN`: shared token for external triggers (`?token=...` or header `X-Token`)
 - `KASA_USERNAME`, `KASA_PASSWORD`, `KASA_INTERFACE`: optional local-auth / interface settings for python-kasa
 - `KASA_SCENE_DISCOVERY_TIMEOUT`, `KASA_HOST_CONNECT_TIMEOUT`, `KASA_STARTUP_DISCOVERY_TIMEOUT`, `KASA_PERIODIC_DISCOVERY_INTERVAL`
+
+### Physical Light Characterization (Digital Twin Input)
+
+Use `characterize_lights.py` to exercise real devices and measure:
+- command ack latency
+- state convergence latency
+- loss/failure probability
+- failure bursts
+- stale-read lag proxy (`convergence - ack`)
+
+Safety: the script sends real on/off commands and requires `--confirm-live`.
+
+Examples:
+
+```powershell
+# Quick run against all devices in config.json
+python .\characterize_lights.py --confirm-live --rounds 2 --restore-initial-state
+
+# Characterize one room for an extended period (4 hours)
+python .\characterize_lights.py --confirm-live --room Basement --duration-s 14400 --idle-seconds 2 --restore-initial-state
+
+# Scene-targeted run with custom modes
+python .\characterize_lights.py --confirm-live --scene BasementOn --mode single,group-parallel --rounds 20 --restore-initial-state
+```
+
+Outputs are written to `characterization_output/`:
+- `characterization_<timestamp>.json` (full records)
+- `characterization_summary_<timestamp>.json` (aggregates + suggested simulator profile)
 
 
 

@@ -8,6 +8,36 @@ This document contains step-by-step instructions for building and deploying Kasa
 - Raspberry Pi with SSH access
 - Project files on Windows PC
 
+## Quick Deploy Script (Recommended)
+
+If you want build + deploy in one command from Windows PowerShell:
+
+```powershell
+.\deploy_raspberry_pi.ps1
+```
+
+Common options:
+
+```powershell
+# Do not build, only deploy local dist/KasaBasementBridge
+.\deploy_raspberry_pi.ps1 -SkipBuild
+
+# Preview what would run
+.\deploy_raspberry_pi.ps1 -DryRun
+
+# Custom target
+.\deploy_raspberry_pi.ps1 -PiHost KasaBasementPi.local -PiUser cpralle -RemoteDir ~/KasaBasement -ServiceName kasabasement
+
+# Explicit SSH key (recommended for passwordless deploy)
+.\deploy_raspberry_pi.ps1 -PiHost 192.168.1.37 -PiUser cpralle -SshKeyPath "$env:USERPROFILE\secrets\kasabridge_deployKey"
+```
+
+The script performs:
+1. Local build via `build_docker_desktop.ps1` (unless `-SkipBuild`)
+2. Remote service stop
+3. Upload executable (+ templates by default)
+4. `chmod +x`, service start, status output
+
 ## Building the Executable (Windows)
 
 1. **Open PowerShell** and navigate to the project directory:

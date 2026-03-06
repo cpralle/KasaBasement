@@ -245,7 +245,10 @@ routine_scheduler_task: Optional[asyncio.Task] = None
 # Cache for device connections to avoid reconnecting on every button press
 _device_connection_cache: dict[str, tuple[IotDevice, datetime]] = {}
 _device_cache_lock = asyncio.Lock()
-_device_cache_ttl = 30  # seconds - cache device connections for 30 seconds
+_device_cache_ttl = int(os.getenv("KASA_DEVICE_CACHE_TTL", "300"))  # seconds
+KASA_DEVICE_KEEPALIVE_INTERVAL = int(os.getenv("KASA_DEVICE_KEEPALIVE_INTERVAL", "20"))  # seconds
+KASA_DEVICE_KEEPALIVE_TIMEOUT = float(os.getenv("KASA_DEVICE_KEEPALIVE_TIMEOUT", "0.8"))  # seconds per device
+device_keepalive_task: Optional[asyncio.Task] = None
 
 # --- Last scene run (for Diagnostics UI) ---
 last_scene_run: Optional[dict] = None
@@ -257,13 +260,25 @@ last_scene_run_lock = asyncio.Lock()
 CYCLE_DEBOUNCE_SECONDS = 0.15  # 150ms window to accumulate rapid presses
 _room_cycle_state: dict[int, dict] = {}  # room_idx -> {count, lock, pending_task}
 
+# --- Room toggle concurrency guard ---
+# Prevent panic double-taps from causing unintended second flips.
+TOGGLE_COOLDOWN_SECONDS = float(os.getenv("TOGGLE_COOLDOWN_SECONDS", "1.2"))
+_room_toggle_state: dict[int, dict] = {}  # room_idx -> {lock, executing, pending, last_completed}
+
 # --- Device state cache (for external state notifications) ---
 # Allows external systems (e.g., IFTTT) to notify us of state changes they made,
 # so toggle operations use correct state without querying slow devices.
 # Format: {mac_normalized: {"is_on": bool, "ts": float}}
 _device_state_cache: dict[str, dict] = {}
 _device_state_cache_lock = asyncio.Lock()
-DEVICE_STATE_CACHE_TTL = 60.0  # Trust notified state for 60 seconds
+DEVICE_STATE_CACHE_TTL = float(os.getenv("DEVICE_STATE_CACHE_TTL", "600"))  # seconds
+
+# Background room state reconciliation: keeps room.is_on aligned with actual devices
+# without adding latency to incoming trigger requests.
+KASA_ROOM_RECONCILE_ENABLED = os.getenv("KASA_ROOM_RECONCILE_ENABLED", "1").strip() != "0"
+KASA_ROOM_RECONCILE_INTERVAL = int(os.getenv("KASA_ROOM_RECONCILE_INTERVAL", "45"))  # seconds
+KASA_ROOM_RECONCILE_TIMEOUT = float(os.getenv("KASA_ROOM_RECONCILE_TIMEOUT", "1.2"))  # seconds per room
+room_reconcile_task: Optional[asyncio.Task] = None
 
 # --- Scene execution serialization ---
 # Multiple triggers can arrive back-to-back (dashboard click + room cycle + routines).
@@ -574,6 +589,132 @@ async def periodic_discovery_loop():
         except Exception:
             pass
         await asyncio.sleep(KASA_PERIODIC_DISCOVERY_INTERVAL)
+
+
+async def device_keepalive_once():
+    """
+    Warm cached device sessions in the background so first trigger after idle
+    does not pay connect/update penalties.
+    """
+    async def keep_one(dev_cfg: DeviceConfig):
+        mac_norm = normalize_mac(dev_cfg.mac)
+        if not dev_cfg.host:
+            return
+        try:
+            dev = await asyncio.wait_for(kasa_discover_single(dev_cfg.host), timeout=KASA_HOST_CONNECT_TIMEOUT)
+            await asyncio.wait_for(dev.update(), timeout=KASA_DEVICE_KEEPALIVE_TIMEOUT)
+            if getattr(dev, "modules", None) is not None:
+                async with _device_cache_lock:
+                    _device_connection_cache[mac_norm] = (dev, datetime.now(timezone.utc))
+        except Exception:
+            # Best effort only: keepalive failures should not affect request handling.
+            pass
+
+    await asyncio.gather(*(keep_one(d) for d in config.devices))
+
+    # Prune stale cache entries.
+    now = datetime.now(timezone.utc)
+    async with _device_cache_lock:
+        stale = [
+            mac for mac, (_dev, ts) in _device_connection_cache.items()
+            if (now - ts).total_seconds() >= _device_cache_ttl
+        ]
+        for mac in stale:
+            _device_connection_cache.pop(mac, None)
+
+
+async def device_keepalive_loop():
+    while True:
+        try:
+            await device_keepalive_once()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            pass
+        await asyncio.sleep(KASA_DEVICE_KEEPALIVE_INTERVAL)
+
+
+async def reconcile_room_states_once():
+    """
+    Update room.is_on by probing current device states in the background.
+    Does not block toggle requests.
+    """
+    alias_to_cfg = {d.alias: d for d in config.devices}
+    now = time.time()
+    changed = False
+
+    for room_idx, room in enumerate(config.rooms):
+        mapped = _get_base_scenes_for_room(room_idx)
+        if not mapped:
+            continue
+
+        aliases: set[str] = set()
+        for scene in mapped:
+            for action in scene.actions:
+                if action.device_alias in alias_to_cfg:
+                    aliases.add(action.device_alias)
+        if not aliases:
+            continue
+        aliases_list = sorted(aliases)
+
+        mac_to_device: dict[str, IotDevice] = {}
+
+        async def probe_one(alias: str) -> Optional[bool]:
+            cfg = alias_to_cfg.get(alias)
+            if not cfg:
+                return None
+            try:
+                device, _ = await resolve_device_for_config(cfg, mac_to_device)
+                if not device:
+                    return None
+                # resolve_device_for_config already called update(), so is_on is fresh enough.
+                is_on = read_device_is_on(device)
+                if isinstance(is_on, bool):
+                    return is_on
+                return None
+            except Exception:
+                return None
+
+        try:
+            states = await asyncio.wait_for(
+                asyncio.gather(*[probe_one(alias) for alias in aliases_list]),
+                timeout=KASA_ROOM_RECONCILE_TIMEOUT,
+            )
+        except Exception:
+            continue
+
+        known = [s for s in states if isinstance(s, bool)]
+        if not known:
+            continue
+
+        room_any_on = any(known)
+        if room.is_on != room_any_on:
+            room.is_on = room_any_on
+            changed = True
+
+        # Refresh device state cache with reconciled truth.
+        async with _device_state_cache_lock:
+            for alias, state in zip(aliases_list, states):
+                if not isinstance(state, bool):
+                    continue
+                cfg = alias_to_cfg.get(alias)
+                if not cfg:
+                    continue
+                _device_state_cache[normalize_mac(cfg.mac)] = {"is_on": state, "ts": now}
+
+    if changed:
+        save_config(config)
+
+
+async def room_reconcile_loop():
+    while True:
+        try:
+            await reconcile_room_states_once()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            pass
+        await asyncio.sleep(KASA_ROOM_RECONCILE_INTERVAL)
 
 def verify_trigger_token(token: Optional[str]):
     """If SCENE_TRIGGER_TOKEN is set, require a matching token (query param or header)."""
@@ -1607,6 +1748,11 @@ async def on_startup():
     # Don't block startup; run initial refresh in the background.
     asyncio.create_task(refresh_discovery_cache(timeout=KASA_STARTUP_DISCOVERY_TIMEOUT, update_config_hosts=True))
     periodic_discovery_task = asyncio.create_task(periodic_discovery_loop())
+    global device_keepalive_task
+    device_keepalive_task = asyncio.create_task(device_keepalive_loop())
+    global room_reconcile_task
+    if KASA_ROOM_RECONCILE_ENABLED:
+        room_reconcile_task = asyncio.create_task(room_reconcile_loop())
     global routine_scheduler_task
     routine_scheduler_task = asyncio.create_task(routine_scheduler_loop())
     ensure_test_scene()
@@ -1618,6 +1764,14 @@ async def on_shutdown():
     if periodic_discovery_task:
         periodic_discovery_task.cancel()
         periodic_discovery_task = None
+    global device_keepalive_task
+    if device_keepalive_task:
+        device_keepalive_task.cancel()
+        device_keepalive_task = None
+    global room_reconcile_task
+    if room_reconcile_task:
+        room_reconcile_task.cancel()
+        room_reconcile_task = None
     global routine_scheduler_task
     if routine_scheduler_task:
         routine_scheduler_task.cancel()
@@ -1944,6 +2098,9 @@ async def api_notify_all_on(
         for dev in config.devices:
             mac = normalize_mac(dev.mac)
             _device_state_cache[mac] = {"is_on": True, "ts": now}
+    for room in config.rooms:
+        room.is_on = True
+    save_config(config)
 
     await publish_sse("state_notify", {"state": "all_on", "device_count": len(config.devices)})
     return {"status": "success", "state": "all_on", "devices_updated": len(config.devices)}
@@ -1965,6 +2122,9 @@ async def api_notify_all_off(
         for dev in config.devices:
             mac = normalize_mac(dev.mac)
             _device_state_cache[mac] = {"is_on": False, "ts": now}
+    for room in config.rooms:
+        room.is_on = False
+    save_config(config)
 
     await publish_sse("state_notify", {"state": "all_off", "device_count": len(config.devices)})
     return {"status": "success", "state": "all_off", "devices_updated": len(config.devices)}
@@ -1993,6 +2153,9 @@ async def api_notify_state_get(
         for dev in config.devices:
             mac = normalize_mac(dev.mac)
             _device_state_cache[mac] = {"is_on": is_on, "ts": now}
+    for room in config.rooms:
+        room.is_on = is_on
+    save_config(config)
 
     await publish_sse("state_notify", {"state": state_lower, "device_count": len(config.devices)})
     return {"status": "success", "state": state_lower, "devices_updated": len(config.devices)}
@@ -2230,16 +2393,67 @@ async def api_room_toggle_post(request: Request, room_name: str, token: Optional
 async def _run_room_toggle(request: Request, room_name: str) -> dict:
     """
     Room-level on/off toggle.
-    - Check state of devices in the room (uses cache if available, else room.is_on)
-    - If on: turn all off and set is_on=False (keep active_scene unchanged)
-    - If off: turn on using active_scene (or fall back to first mapped scene)
+    - If toggle is already executing for this room, queue at most one extra toggle.
+    - After completion, apply a short cooldown window to drop accidental late re-presses.
     """
     room_idx, room = _get_room_by_name(room_name)
+    if room_idx not in _room_toggle_state:
+        _room_toggle_state[room_idx] = {
+            "lock": asyncio.Lock(),
+            "executing": False,
+            "pending": False,
+            "last_completed": 0.0,
+        }
+    state = _room_toggle_state[room_idx]
+    now = time.monotonic()
+
+    async with state["lock"]:
+        if state["executing"]:
+            if not state["pending"]:
+                state["pending"] = True
+                await log_event("room_toggle_queued", request, {"room": room.name})
+                return {"status": "queued", "room": room.name}
+            await log_event("room_toggle_ignored", request, {"room": room.name, "reason": "already_queued"})
+            return {"status": "ignored", "room": room.name, "reason": "already_queued"}
+
+        since_complete = now - float(state.get("last_completed", 0.0) or 0.0)
+        if since_complete < TOGGLE_COOLDOWN_SECONDS:
+            retry_after = max(0.0, TOGGLE_COOLDOWN_SECONDS - since_complete)
+            await log_event("room_toggle_cooldown", request, {"room": room.name, "retry_after_s": retry_after})
+            return {"status": "cooldown", "room": room.name, "retry_after_s": retry_after}
+
+        state["executing"] = True
+
+    try:
+        first = await _execute_room_toggle_once(request, room_idx, room)
+        run_pending = False
+        async with state["lock"]:
+            run_pending = bool(state["pending"])
+            state["pending"] = False
+
+        if not run_pending:
+            return first
+
+        await log_event("room_toggle_run_queued", request, {"room": room.name})
+        second = await _execute_room_toggle_once(request, room_idx, room)
+        return {
+            "status": "success",
+            "room": room.name,
+            "queued_executed": True,
+            "first": first,
+            "second": second,
+        }
+    finally:
+        async with state["lock"]:
+            state["executing"] = False
+            state["last_completed"] = time.monotonic()
+
+
+async def _execute_room_toggle_once(request: Request, room_idx: int, room: Room) -> dict:
     mapped = _get_base_scenes_for_room(room_idx)
     if not mapped:
         raise HTTPException(status_code=409, detail="No scenes mapped to this room")
 
-    # Gather all unique devices from all scenes in this room
     alias_to_cfg = {d.alias: d for d in config.devices}
     room_device_aliases: set[str] = set()
     for scene in mapped:
@@ -2250,34 +2464,10 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
     if not room_device_aliases:
         raise HTTPException(status_code=409, detail="No devices found in room scenes")
 
-    # Check if room is on: use cache if fresh, otherwise trust room.is_on
-    # This is fast - no device queries (those are slow over WiFi)
-    now = time.time()
-    any_on = False
-    found_fresh_cache = False
-
-    # First check the state cache for any room device
-    async with _device_state_cache_lock:
-        for alias in room_device_aliases:
-            dev_cfg = alias_to_cfg.get(alias)
-            if not dev_cfg:
-                continue
-            mac = normalize_mac(dev_cfg.mac)
-            cached = _device_state_cache.get(mac)
-            if cached and (now - cached["ts"]) < DEVICE_STATE_CACHE_TTL:
-                found_fresh_cache = True
-                if cached["is_on"]:
-                    any_on = True
-                    break  # Found one on, that's enough
-
-    # If no fresh cache, trust room.is_on (tracks on/off state separately from scene)
-    if not found_fresh_cache:
-        any_on = room.is_on
-
+    any_on = bool(room.is_on)
     await log_event("room_toggle_state", request, {"room": room.name, "any_on": any_on, "is_on": room.is_on, "active_scene": room.active_scene})
 
     if any_on:
-        # Turn all devices in the room OFF
         off_actions = [SceneAction(device_alias=alias, action="off", params=None) for alias in room_device_aliases]
         off_scene = Scene(
             name=f"{room.name}_toggle:off",
@@ -2285,21 +2475,19 @@ async def _run_room_toggle(request: Request, room_name: str) -> dict:
             room_idx=room_idx,
         )
         res = await execute_scene(off_scene, update_room_state=False)
-        # Mark room as off (keep active_scene unchanged - it's the selected scene)
         room.is_on = False
         save_config(config)
         await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=off_scene.name, res=res)
         return {"status": "success", "action": "off", "room": room.name, "results": res.get("results", [])}
-    else:
-        # Turn ON: use active_scene (or fall back to first mapped scene)
-        on_scene = None
-        if room.active_scene:
-            on_scene = next((s for s in mapped if s.name.lower() == room.active_scene.lower()), None)
-        if not on_scene:
-            on_scene = mapped[0]
-        res = await execute_scene(on_scene)
-        await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=on_scene.name, res=res)
-        return {"status": "success", "action": "on", "room": room.name, "scene": on_scene.name, "results": res.get("results", [])}
+
+    on_scene = None
+    if room.active_scene:
+        on_scene = next((s for s in mapped if s.name.lower() == room.active_scene.lower()), None)
+    if not on_scene:
+        on_scene = mapped[0]
+    res = await execute_scene(on_scene)
+    await _record_last_scene_run(request=request, trigger="room_toggle", scene_name=on_scene.name, res=res)
+    return {"status": "success", "action": "on", "room": room.name, "scene": on_scene.name, "results": res.get("results", [])}
 
 async def _run_room_cycle(request: Request, room_name: str) -> dict:
     """
