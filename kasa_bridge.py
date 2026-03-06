@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request, HTTPException, Form, Header
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.responses import StreamingResponse
-from kasa import Discover, Module
+from kasa import Device, Discover, Module
 from kasa.iot import IotDevice
 
 # Patch kasa timezone lookup to fall back to UTC for unrecognized timezone keys
@@ -397,7 +397,7 @@ async def kasa_discover(timeout: int = 15):
 
 async def kasa_discover_single(host: str):
     """
-    Best-effort single-device lookup by IP/host.
+    Discovery-based single-device lookup by IP/host.
     Uses optional credentials/interface when supported by the installed python-kasa.
     """
     kwargs = {}
@@ -411,6 +411,30 @@ async def kasa_discover_single(host: str):
     except TypeError:
         # Older python-kasa versions may not support kwargs here
         return await asyncio.wait_for(Discover.discover_single(host), timeout=KASA_HOST_CONNECT_TIMEOUT)
+
+
+async def kasa_connect_cached_host(host: str):
+    """
+    Resolve a known host as quickly as possible.
+
+    Prefer direct TCP connect, which avoids UDP discovery and returns an already
+    updated device. If that fails and auth credentials are configured, fall back
+    to discovery-based lookup so newer authenticated devices still work.
+    """
+    try:
+        return await asyncio.wait_for(Device.connect(host=host), timeout=KASA_HOST_CONNECT_TIMEOUT)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        if not (KASA_USERNAME and KASA_PASSWORD):
+            raise
+
+    dev = await kasa_discover_single(host)
+    try:
+        await dev.update()
+    except Exception:
+        pass
+    return dev
 
 async def discover_devices(timeout: int = 15) -> dict:
     """Discover all Kasa devices on the network and return a dict mapping MAC to device info."""
@@ -431,11 +455,7 @@ async def discover_devices(timeout: int = 15) -> dict:
             # If MAC is missing but we have an IP/host, try a direct lookup (often works better than broadcast object).
             if (not mac) and host:
                 try:
-                    direct = await kasa_discover_single(host)
-                    try:
-                        await direct.update()
-                    except Exception:
-                        pass
+                    direct = await kasa_connect_cached_host(host)
                     mac = getattr(direct, "mac", None) or mac
                     # Prefer richer metadata if direct connect succeeded.
                     if getattr(direct, "alias", None):
@@ -504,11 +524,7 @@ async def refresh_discovery_cache(*, timeout: int, update_config_hosts: bool) ->
                     debug["broadcast_missing_mac"] += 1
                     debug["fallback_attempted"] += 1
                     try:
-                        direct = await kasa_discover_single(host)
-                        try:
-                            await direct.update()
-                        except Exception:
-                            pass
+                        direct = await kasa_connect_cached_host(host)
                         mac = getattr(direct, "mac", None) or mac
                         if mac:
                             debug["fallback_recovered"] += 1
@@ -601,8 +617,7 @@ async def device_keepalive_once():
         if not dev_cfg.host:
             return
         try:
-            dev = await asyncio.wait_for(kasa_discover_single(dev_cfg.host), timeout=KASA_HOST_CONNECT_TIMEOUT)
-            await asyncio.wait_for(dev.update(), timeout=KASA_DEVICE_KEEPALIVE_TIMEOUT)
+            dev = await kasa_connect_cached_host(dev_cfg.host)
             if getattr(dev, "modules", None) is not None:
                 async with _device_cache_lock:
                     _device_connection_cache[mac_norm] = (dev, datetime.now(timezone.utc))
@@ -841,66 +856,14 @@ async def execute_scene(scene: Scene, update_room_state: bool = True) -> dict:
                 if action.action == "toggle":
                     await toggle_device_power(device, skip_update=True)  # resolve_device_for_config already updated
                 elif action.action == "on":
-                    await device.turn_on()
+                    if str(device_config.type).lower() == "bulb":
+                        await apply_bulb_on_action(device, action)
+                    else:
+                        await device.turn_on()
                 elif action.action == "off":
                     await device.turn_off()
                 else:
                     return {"device": action.device_alias, "status": "error", "message": f"Unknown action: {action.action}"}
-
-                if action.action == "on" and str(device_config.type).lower() == "bulb" and action.params:
-                    light = get_light_module(device)
-                    # White mode / color temperature: if provided, do NOT force RGB color mode.
-                    if "color_temp" in action.params and action.params["color_temp"] is not None:
-                        try:
-                            await set_light_color_temp_k(device, kelvin=int(action.params["color_temp"]))
-                        except Exception as e:
-                            return {"device": action.device_alias, "status": "error", "message": f"color_temp failed: {e}"}
-                    # IMPORTANT: set color FIRST, then brightness.
-                    # Setting HSV often implicitly sets "value" (brightness) which can override a dimmed brightness
-                    # and/or force brightness to 100 if we derive V from a full-brightness color swatch.
-                    applied_brightness_via_hsv = False
-                    if ("color_temp" not in action.params or action.params.get("color_temp") is None) and "color" in action.params and action.params["color"]:
-                        hex_color = str(action.params["color"]).lstrip("#")
-                        if len(hex_color) != 6:
-                            raise ValueError("color must be 6 hex digits (e.g. #FF00AA)")
-                        rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-                        hsv = colorsys.rgb_to_hsv(rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0)
-                        hue = int(hsv[0] * 360)
-                        saturation = int(hsv[1] * 100)
-                        # If brightness is explicitly provided, apply it via HSV "value" to avoid an extra network call.
-                        target_brightness = None
-                        if "brightness" in action.params and action.params["brightness"] is not None:
-                            try:
-                                target_brightness = max(0, min(100, int(action.params["brightness"])))
-                            except Exception:
-                                target_brightness = None
-
-                        if target_brightness is not None:
-                            value = int(target_brightness)
-                            applied_brightness_via_hsv = True
-                        else:
-                            # Preserve current brightness when applying color-only.
-                            # resolve_device_for_config already called update(), state is fresh
-                            current_brightness = None
-                            try:
-                                state = read_light_state(device) or {}
-                                if isinstance(state, dict):
-                                    current_brightness = state.get("brightness")
-                            except Exception:
-                                pass
-                            value = int((current_brightness if current_brightness is not None else 100))
-                        if light and getattr(light, "has_feature", None) and light.has_feature("hsv") and getattr(light, "set_hsv", None):
-                            await light.set_hsv(hue, saturation, value)
-                        else:
-                            await device.set_hsv(hue, saturation, value)
-
-                    # If we already applied brightness via HSV above, don't send a second brightness command.
-                    if (not applied_brightness_via_hsv) and "brightness" in action.params and action.params["brightness"] is not None:
-                        b = max(0, min(100, int(action.params["brightness"])))
-                        if light and getattr(light, "set_brightness", None):
-                            await light.set_brightness(b)
-                        else:
-                            await device.set_brightness(b)
 
                 if device_config.host != device.host:
                     device_config.host = device.host
@@ -1597,6 +1560,78 @@ async def set_light_color_temp_k(device: IotDevice, *, kelvin: int):
             return
     raise AttributeError("Color temperature not supported by this bulb")
 
+
+async def apply_bulb_on_action(device: IotDevice, action: SceneAction):
+    """
+    Apply an "on" bulb action using the fewest device requests we can.
+
+    For bulbs, methods like set_hsv/set_color_temp/set_brightness already imply
+    power-on, so avoid sending turn_on() first when the final state is known.
+    """
+    params = dict(action.params or {})
+    if not params:
+        await device.turn_on()
+        return
+
+    light = get_light_module(device)
+
+    target_brightness = None
+    if "brightness" in params and params["brightness"] is not None:
+        target_brightness = max(0, min(100, int(params["brightness"])))
+
+    if "color_temp" in params and params["color_temp"] is not None:
+        k = int(params["color_temp"])
+        if light and getattr(light, "set_color_temp", None):
+            try:
+                if target_brightness is not None:
+                    await light.set_color_temp(k, brightness=target_brightness)
+                else:
+                    await light.set_color_temp(k)
+                return
+            except TypeError:
+                pass
+        await set_light_color_temp_k(device, kelvin=k)
+        if target_brightness is not None:
+            if light and getattr(light, "set_brightness", None):
+                await light.set_brightness(target_brightness)
+            else:
+                await device.set_brightness(target_brightness)
+        return
+
+    if "color" in params and params["color"]:
+        hex_color = str(params["color"]).lstrip("#")
+        if len(hex_color) != 6:
+            raise ValueError("color must be 6 hex digits (e.g. #FF00AA)")
+        rgb = tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+        hsv = colorsys.rgb_to_hsv(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0)
+        hue = int(hsv[0] * 360)
+        saturation = int(hsv[1] * 100)
+
+        if target_brightness is None:
+            current_brightness = None
+            try:
+                state = read_light_state(device) or {}
+                if isinstance(state, dict):
+                    current_brightness = state.get("brightness")
+            except Exception:
+                pass
+            target_brightness = int(current_brightness if current_brightness is not None else 100)
+
+        if light and getattr(light, "has_feature", None) and light.has_feature("hsv") and getattr(light, "set_hsv", None):
+            await light.set_hsv(hue, saturation, target_brightness)
+        else:
+            await device.set_hsv(hue, saturation, target_brightness)
+        return
+
+    if target_brightness is not None:
+        if light and getattr(light, "set_brightness", None):
+            await light.set_brightness(target_brightness)
+        else:
+            await device.set_brightness(target_brightness)
+        return
+
+    await device.turn_on()
+
 async def compute_device_statuses() -> list[dict]:
     """
     Compute status for all configured devices.
@@ -1677,14 +1712,7 @@ async def resolve_device_for_config(
     # Fast path: if we have a cached IP, try it first (much faster than broadcast discovery)
     if device_config.host:
         try:
-            # Use shorter timeout for faster response
-            dev = await asyncio.wait_for(kasa_discover_single(device_config.host), timeout=KASA_HOST_CONNECT_TIMEOUT)
-            # IMPORTANT: Must call update() to populate device.modules before caching/using.
-            # Without this, device.modules is None and set_hsv/set_brightness fail.
-            try:
-                await dev.update()
-            except Exception:
-                pass
+            dev = await kasa_connect_cached_host(device_config.host)
             # Only cache if the device has valid modules (update succeeded)
             if getattr(dev, "modules", None) is not None:
                 async with _device_cache_lock:

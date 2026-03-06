@@ -29,6 +29,38 @@ class FakeDevice:
         self.is_on = False
 
 
+class FakeBulbDevice(FakeDevice):
+    def __init__(self, host: str, is_on: bool = False, brightness: int = 100):
+        super().__init__(host, is_on=is_on)
+        self.brightness = brightness
+        self.hsv = (0, 0, brightness)
+        self.color_temp = 2700
+        self.set_hsv_calls = []
+        self.set_brightness_calls = []
+        self.set_color_temp_calls = []
+
+    def has_feature(self, name: str) -> bool:
+        return name in {"hsv", "brightness", "color_temp"}
+
+    async def set_hsv(self, hue: int, saturation: int, value: int):
+        self.set_hsv_calls.append((hue, saturation, value))
+        self.hsv = (hue, saturation, value)
+        self.brightness = value
+        self.is_on = True
+
+    async def set_brightness(self, brightness: int):
+        self.set_brightness_calls.append(brightness)
+        self.brightness = brightness
+        self.is_on = True
+
+    async def set_color_temp(self, temp: int, brightness: int | None = None):
+        self.set_color_temp_calls.append((temp, brightness))
+        self.color_temp = temp
+        if brightness is not None:
+            self.brightness = brightness
+        self.is_on = True
+
+
 @pytest.fixture(autouse=True)
 def isolate_globals(monkeypatch):
     original_config = kb.config.model_copy(deep=True)
@@ -168,10 +200,10 @@ async def test_device_keepalive_once_warms_connection_cache(monkeypatch):
     seed_single_room_config()
     kb._device_connection_cache.clear()
 
-    async def fake_discover_single(host):
+    async def fake_connect_cached_host(host):
         return FakeDevice(host, is_on=False)
 
-    monkeypatch.setattr(kb, "kasa_discover_single", fake_discover_single)
+    monkeypatch.setattr(kb, "kasa_connect_cached_host", fake_connect_cached_host)
 
     await kb.device_keepalive_once()
 
@@ -184,5 +216,119 @@ async def test_device_keepalive_once_warms_connection_cache(monkeypatch):
     assert kb.normalize_mac("aa:aa:aa:aa:aa:02") in cache_keys
     assert isinstance(dev_a, FakeDevice)
     assert isinstance(dev_b, FakeDevice)
-    assert dev_a.update_calls >= 1
-    assert dev_b.update_calls >= 1
+    assert dev_a.update_calls == 0
+    assert dev_b.update_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_kasa_connect_cached_host_prefers_device_connect(monkeypatch):
+    expected = FakeDevice("10.0.0.10", is_on=False)
+
+    async def fake_connect(*, host=None, config=None):
+        assert host == "10.0.0.10"
+        assert config is None
+        return expected
+
+    async def fake_discover_single(_host):
+        raise AssertionError("discovery fallback should not be used")
+
+    monkeypatch.setattr(kb.Device, "connect", fake_connect)
+    monkeypatch.setattr(kb, "kasa_discover_single", fake_discover_single)
+
+    actual = await kb.kasa_connect_cached_host("10.0.0.10")
+    assert actual is expected
+
+
+@pytest.mark.asyncio
+async def test_kasa_connect_cached_host_falls_back_to_discovery_for_auth(monkeypatch):
+    expected = FakeDevice("10.0.0.10", is_on=False)
+
+    async def fake_connect(*, host=None, config=None):
+        raise RuntimeError("direct connect failed")
+
+    async def fake_discover_single(host):
+        assert host == "10.0.0.10"
+        return expected
+
+    monkeypatch.setattr(kb.Device, "connect", fake_connect)
+    monkeypatch.setattr(kb, "kasa_discover_single", fake_discover_single)
+    monkeypatch.setattr(kb, "KASA_USERNAME", "user@example.com")
+    monkeypatch.setattr(kb, "KASA_PASSWORD", "secret")
+
+    actual = await kb.kasa_connect_cached_host("10.0.0.10")
+    assert actual is expected
+    assert expected.update_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_scene_color_bulb_uses_single_hsv_write(client, monkeypatch):
+    kb.config = kb.Config(
+        devices=[kb.DeviceConfig(alias="Bulb A", mac="aa:aa:aa:aa:aa:01", host="10.0.0.10", type="bulb")],
+        scenes=[
+            kb.Scene(
+                name="ColorScene",
+                actions=[
+                    kb.SceneAction(
+                        device_alias="Bulb A",
+                        action="on",
+                        params={"color": "#ff0000", "brightness": 25},
+                    )
+                ],
+            )
+        ],
+        rooms=[],
+        routines=[],
+    )
+    bulb = FakeBulbDevice("10.0.0.10", is_on=False, brightness=60)
+
+    async def fake_resolve(dev_cfg, _mac_to_device):
+        assert dev_cfg.alias == "Bulb A"
+        return bulb, "fake"
+
+    monkeypatch.setattr(kb, "resolve_device_for_config", fake_resolve)
+    monkeypatch.setattr(kb, "get_light_module", lambda device: device)
+
+    resp = await client.get("/api/trigger/scene/ColorScene")
+
+    assert resp.status_code == 200
+    assert bulb.turn_on_calls == 0
+    assert bulb.set_hsv_calls == [(0, 100, 25)]
+    assert bulb.set_brightness_calls == []
+    assert bulb.set_color_temp_calls == []
+
+
+@pytest.mark.asyncio
+async def test_scene_color_temp_bulb_uses_single_color_temp_write(client, monkeypatch):
+    kb.config = kb.Config(
+        devices=[kb.DeviceConfig(alias="Bulb A", mac="aa:aa:aa:aa:aa:01", host="10.0.0.10", type="bulb")],
+        scenes=[
+            kb.Scene(
+                name="WarmScene",
+                actions=[
+                    kb.SceneAction(
+                        device_alias="Bulb A",
+                        action="on",
+                        params={"color_temp": 3000, "brightness": 40},
+                    )
+                ],
+            )
+        ],
+        rooms=[],
+        routines=[],
+    )
+    bulb = FakeBulbDevice("10.0.0.10", is_on=False, brightness=80)
+
+    async def fake_resolve(dev_cfg, _mac_to_device):
+        assert dev_cfg.alias == "Bulb A"
+        return bulb, "fake"
+
+    monkeypatch.setattr(kb, "resolve_device_for_config", fake_resolve)
+    monkeypatch.setattr(kb, "get_light_module", lambda device: device)
+
+    resp = await client.get("/api/trigger/scene/WarmScene")
+
+    assert resp.status_code == 200
+    assert bulb.turn_on_calls == 0
+    assert bulb.set_color_temp_calls == [(3000, 40)]
+    assert bulb.set_brightness_calls == []
+    assert bulb.set_hsv_calls == []
