@@ -4,10 +4,14 @@
 Builds and deploys KasaBasementBridge to a Raspberry Pi over SSH/SCP.
 
 .DESCRIPTION
+Reads deployment settings from deploy_config.json (if present), then:
 1) Runs local ARM build (unless -SkipBuild is used)
 2) Stops remote systemd service
 3) Uploads executable and templates
 4) Makes executable, restarts service, prints status
+
+To configure for your setup, copy deploy_config.example.json to deploy_config.json
+and edit the values.
 
 .EXAMPLE
 .\deploy_raspberry_pi.ps1
@@ -21,13 +25,13 @@ Builds and deploys KasaBasementBridge to a Raspberry Pi over SSH/SCP.
 
 [CmdletBinding()]
 param(
-    [string]$PiHost = "raspberrypi.local",
-    [string]$PiUser = "pi",
-    [string]$RemoteDir = "~/KasaBasement",
-    [string]$ServiceName = "kasabasement",
+    [string]$PiHost,
+    [string]$PiUser,
+    [string]$RemoteDir,
+    [string]$ServiceName,
     [string]$BuildScript = ".\build_docker_desktop.ps1",
     [string]$ExecutablePath = ".\dist\KasaBasementBridge",
-    [string]$SshKeyPath = "",
+    [string]$SshKeyPath,
     [switch]$AllowInteractiveSsh,
     [switch]$SkipBuild,
     [switch]$NoTemplateSync,
@@ -36,6 +40,35 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+# Load config from deploy_config.json if it exists
+$configPath = Join-Path $PSScriptRoot "deploy_config.json"
+$config = @{
+    pi_host = "raspberrypi.local"
+    pi_user = "pi"
+    remote_dir = "~/KasaBasement"
+    service_name = "kasabasement"
+    ssh_key_path = ""
+}
+
+if (Test-Path $configPath) {
+    Write-Host "Loading config from deploy_config.json" -ForegroundColor Gray
+    $loadedConfig = Get-Content $configPath | ConvertFrom-Json
+    if ($loadedConfig.pi_host) { $config.pi_host = $loadedConfig.pi_host }
+    if ($loadedConfig.pi_user) { $config.pi_user = $loadedConfig.pi_user }
+    if ($loadedConfig.remote_dir) { $config.remote_dir = $loadedConfig.remote_dir }
+    if ($loadedConfig.service_name) { $config.service_name = $loadedConfig.service_name }
+    if ($loadedConfig.ssh_key_path) { $config.ssh_key_path = $loadedConfig.ssh_key_path }
+} else {
+    Write-Host "No deploy_config.json found, using defaults. Copy deploy_config.example.json to deploy_config.json to configure." -ForegroundColor Yellow
+}
+
+# Command-line parameters override config file
+if (-not $PiHost) { $PiHost = $config.pi_host }
+if (-not $PiUser) { $PiUser = $config.pi_user }
+if (-not $RemoteDir) { $RemoteDir = $config.remote_dir }
+if (-not $ServiceName) { $ServiceName = $config.service_name }
+if (-not $SshKeyPath) { $SshKeyPath = $config.ssh_key_path }
 
 function Write-Step {
     param([string]$Message)

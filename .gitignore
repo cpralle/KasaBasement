@@ -38,6 +38,9 @@ Thumbs.db
 # Local config with sensitive network info
 config.json
 
+# Deploy config with personal Pi settings
+deploy_config.json
+
 # Pytest cache directories
 pytest-cache-files-*/
 

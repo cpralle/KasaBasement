@@ -394,6 +394,81 @@ python kasa_bridge.py
 
 Open http://localhost:8000 in your browser.
 
+### 1b. Configure Deployment Settings (Optional)
+
+If you plan to deploy to a Raspberry Pi, configure your deployment settings:
+
+```bash
+# Copy the example config
+cp deploy_config.example.json deploy_config.json
+```
+
+Edit `deploy_config.json` with your Pi's details:
+
+```json
+{
+    "pi_host": "raspberrypi.local",
+    "pi_user": "pi",
+    "remote_dir": "~/KasaBasement",
+    "service_name": "kasabasement",
+    "ssh_key_path": ""
+}
+```
+
+**Configuration options:**
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `pi_host` | Hostname or IP of your Raspberry Pi | `raspberrypi.local`, `192.168.1.50` |
+| `pi_user` | SSH username on the Pi | `pi` (default), your username |
+| `remote_dir` | Directory on Pi for the application | `~/KasaBasement` |
+| `service_name` | systemd service name | `kasabasement` |
+| `ssh_key_path` | Path to SSH private key (optional) | `~/.ssh/id_ed25519`, leave empty for password auth |
+
+**Examples for common setups:**
+
+Default Raspberry Pi with hostname:
+```json
+{
+    "pi_host": "raspberrypi.local",
+    "pi_user": "pi",
+    "remote_dir": "~/KasaBasement",
+    "service_name": "kasabasement",
+    "ssh_key_path": ""
+}
+```
+
+Pi with custom hostname and SSH key:
+```json
+{
+    "pi_host": "homeserver.local",
+    "pi_user": "admin",
+    "remote_dir": "~/apps/KasaBasement",
+    "service_name": "kasabasement",
+    "ssh_key_path": "C:\\Users\\YourName\\.ssh\\id_ed25519"
+}
+```
+
+Pi accessed by IP address:
+```json
+{
+    "pi_host": "192.168.1.50",
+    "pi_user": "pi",
+    "remote_dir": "~/KasaBasement",
+    "service_name": "kasabasement",
+    "ssh_key_path": ""
+}
+```
+
+Once configured, deployment is simple:
+```powershell
+# Build and deploy in one command
+.\deploy_raspberry_pi.ps1
+
+# Or just deploy (skip build)
+.\deploy_raspberry_pi.ps1 -SkipBuild
+```
+
 ### 2. Discover Your Devices
 
 1. Go to the **Settings** page (link in the header)

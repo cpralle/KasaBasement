@@ -1,0 +1,7 @@
+{
+    "pi_host": "raspberrypi.local",
+    "pi_user": "pi",
+    "remote_dir": "~/KasaBasement",
+    "service_name": "kasabasement",
+    "ssh_key_path": ""
+}

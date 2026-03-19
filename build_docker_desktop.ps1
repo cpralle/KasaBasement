@@ -172,8 +172,13 @@ if (Test-Path "dist/KasaBasementBridge") {
     $fileInfo = Get-Item "dist/KasaBasementBridge"
     Write-Host "File size: $([math]::Round($fileInfo.Length / 1MB, 2)) MB" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "To transfer to Raspberry Pi:" -ForegroundColor Yellow
+    Write-Host "To deploy to Raspberry Pi:" -ForegroundColor Yellow
+    Write-Host "  .\deploy_raspberry_pi.ps1 -SkipBuild" -ForegroundColor White
+    Write-Host ""
+    Write-Host "Or manually transfer:" -ForegroundColor Yellow
     Write-Host "  scp dist\KasaBasementBridge pi@raspberrypi.local:~/KasaBasement/" -ForegroundColor White
+    Write-Host ""
+    Write-Host "(Configure your Pi host/user in deploy_config.json)" -ForegroundColor Gray
     Write-Host ""
 } else {
     Write-Host ""

@@ -32,7 +32,27 @@ This includes:
 
 ### One-Command Deploy (Windows PowerShell)
 
-This repo includes a deploy helper that builds then deploys over SSH/SCP:
+This repo includes a deploy helper that builds then deploys over SSH/SCP.
+
+**First, configure your Pi settings:**
+
+```powershell
+# Copy example config and edit with your Pi's hostname/user
+cp deploy_config.example.json deploy_config.json
+```
+
+Edit `deploy_config.json`:
+```json
+{
+    "pi_host": "raspberrypi.local",
+    "pi_user": "pi",
+    "remote_dir": "~/KasaBasement",
+    "service_name": "kasabasement",
+    "ssh_key_path": ""
+}
+```
+
+**Then deploy:**
 
 ```powershell
 .\deploy_raspberry_pi.ps1

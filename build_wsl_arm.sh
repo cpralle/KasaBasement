@@ -178,8 +178,13 @@ if [ -f "dist/KasaBasementBridge" ]; then
     echo "File info:"
     file dist/KasaBasementBridge
     echo ""
-    echo "To transfer to Raspberry Pi:"
-    echo "  scp dist/KasaBasementBridge pi@raspberrypi.local:~/"
+    echo "To deploy to Raspberry Pi:"
+    echo "  ./deploy_raspberry_pi.ps1 -SkipBuild"
+    echo ""
+    echo "Or manually transfer:"
+    echo "  scp dist/KasaBasementBridge pi@raspberrypi.local:~/KasaBasement/"
+    echo ""
+    echo "(Configure your Pi host/user in deploy_config.json)"
 else
     echo ""
     echo "✗ Build failed!"
