@@ -1,0 +1,113 @@
+{
+    "devices": [
+        {
+            "alias": "Living Room Bulb 01",
+            "mac": "AA:BB:CC:DD:EE:01",
+            "host": "192.168.1.100",
+            "type": "Bulb"
+        },
+        {
+            "alias": "Living Room Bulb 02",
+            "mac": "AA:BB:CC:DD:EE:02",
+            "host": "192.168.1.101",
+            "type": "Bulb"
+        }
+    ],
+    "scenes": [
+        {
+            "name": "Bright",
+            "actions": [
+                {
+                    "device_alias": "Living Room Bulb 01",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                },
+                {
+                    "device_alias": "Living Room Bulb 02",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color_temp": 2700
+                    }
+                }
+            ],
+            "room_idx": 0,
+            "dim_profile": "linear",
+            "grid_map": null
+        },
+        {
+            "name": "Colorful",
+            "actions": [
+                {
+                    "device_alias": "Living Room Bulb 01",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#ff0000"
+                    }
+                },
+                {
+                    "device_alias": "Living Room Bulb 02",
+                    "action": "on",
+                    "params": {
+                        "brightness": 50,
+                        "color": "#0000ff"
+                    }
+                }
+            ],
+            "room_idx": 0,
+            "dim_profile": "aggressive",
+            "grid_map": null
+        }
+    ],
+    "rooms": [
+        {
+            "name": "LivingRoom",
+            "rows": 2,
+            "cols": 2,
+            "grid_map": [
+                {
+                    "device_alias": "Living Room Bulb 01",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                },
+                null,
+                null,
+                {
+                    "device_alias": "Living Room Bulb 02",
+                    "action": "on",
+                    "params": {
+                        "brightness": 100,
+                        "color": "#ffffff"
+                    }
+                }
+            ],
+            "is_on": false,
+            "active_scene": null,
+            "last_on_scene": null,
+            "active_dim": "d4"
+        }
+    ],
+    "routines": [
+        {
+            "name": "Morning Lights",
+            "time_hhmm": "07:00",
+            "enabled": true,
+            "actions": [
+                {
+                    "kind": "scene",
+                    "scene_name": "Bright",
+                    "room_idx": null,
+                    "group_action": null
+                }
+            ],
+            "last_run_date": null
+        }
+    ]
+}

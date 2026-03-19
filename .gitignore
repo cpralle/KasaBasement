@@ -35,8 +35,11 @@ Thumbs.db
 # Logs
 *.log
 
-# Local config with secrets (keep template, ignore actual)
-# config.json is tracked - it's the main config file
+# Local config with sensitive network info
+config.json
+
+# Pytest cache directories
+pytest-cache-files-*/
 
 # Temporary files
 *.tmp
