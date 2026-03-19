@@ -22,6 +22,62 @@ Other Kasa bulbs with color/color-temperature support should also work. The app 
 3. **Static IP for host**: The device running KasaBasement should have a static IP so integrations (Home Assistant, physical buttons) can reliably reach it
 4. **Static IPs for bulbs**: For reliability, assign static IPs to your bulbs via your router's DHCP settings
 
+## Choosing Your Host Device: PC vs Raspberry Pi
+
+KasaBasement can run on any device with Python 3.7+. The two most common choices are a regular PC/laptop or a Raspberry Pi. Here's how to decide:
+
+### Raspberry Pi
+
+A small, dedicated single-board computer that runs 24/7.
+
+| Pros | Cons |
+|------|------|
+| Low power (~3-5W) - costs pennies per month to run | Initial setup requires more technical knowledge |
+| Silent, no fans (most models) | Slower than a PC - build times are longer |
+| Small form factor - tuck it anywhere | Need to purchase separately ($35-75 + SD card + power supply) |
+| Dedicated device - won't be rebooted for Windows updates | SD cards can wear out over time (mitigate with USB boot) |
+| Always on - routines run reliably | Remote access requires SSH setup |
+| Headless operation - no monitor needed | Limited RAM may matter for very large configurations |
+| Great for permanent "set and forget" deployment | |
+
+**Best Raspberry Pi models for KasaBasement:**
+- **Raspberry Pi 4 (2GB+)** - Best performance, recommended
+- **Raspberry Pi 3B+** - Good balance of price and performance
+- **Raspberry Pi Zero 2 W** - Cheapest option, adequate for small setups (10-20 bulbs)
+
+### PC or Laptop (Windows/Mac/Linux)
+
+Use an existing computer you already have.
+
+| Pros | Cons |
+|------|------|
+| No additional hardware purchase | Higher power consumption (50-200W+) |
+| Familiar environment - easy to set up and debug | May not be on 24/7 - routines won't run when off |
+| Faster performance | Reboots for updates interrupt service |
+| Easy access to logs and web UI | Takes up desk/floor space |
+| Good for testing and development | Fan noise |
+| Can run alongside other applications | Computer going to sleep breaks the service |
+
+**When a PC makes sense:**
+- Testing KasaBasement before committing to a dedicated device
+- You have an always-on home server already
+- You only need manual scene control (no scheduled routines)
+- Development and debugging
+
+### Recommendation
+
+For **permanent, reliable operation**: Use a Raspberry Pi. The low power consumption and always-on nature make it ideal for home automation. A Pi 4 with 2GB RAM is more than enough for even large setups.
+
+For **testing or occasional use**: Start with your PC. Once you're happy with your configuration, consider migrating to a Pi for 24/7 operation.
+
+### Hybrid Approach
+
+Many users do both:
+1. **Develop and configure on PC** - easier to edit config, test scenes, debug issues
+2. **Deploy to Raspberry Pi** - use the included deploy script for production
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for instructions on deploying to a Raspberry Pi.
+
 ## Setting Up a Static IP for the Host Device
 
 The device running KasaBasement (your computer, Raspberry Pi, or server) needs a static IP address. Without one, your router may assign it a different IP after a reboot, breaking any external integrations.
