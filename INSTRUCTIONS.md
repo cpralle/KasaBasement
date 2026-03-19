@@ -93,6 +93,71 @@ The Map page shows your room as a grid with colored tiles representing each bulb
 
 This gives you a birds-eye view of your entire lighting setup, updating in real-time as scenes run.
 
+### The Core Use Case: Physical Dimmer with Multi-Scene Support
+
+The primary motivation for KasaBasement was to enable a **single physical controller** to manage multiple scenes with persistent dimming - something the Kasa app doesn't support natively.
+
+**The Problem**: You have a room with several lighting scenes (bright work light, dim movie mode, colorful party mode). You want a physical dial or button to:
+- Turn lights on/off
+- Switch between scenes
+- Dim the current scene
+
+But traditional smart home setups treat dimming and scenes as separate - when you switch scenes, the dimmer resets.
+
+**The Solution**: KasaBasement maintains dimming state independently of the active scene. When you dim to 50% and then cycle to a different scene, the new scene also applies at 50% brightness.
+
+### Example: Flic Twist Setup
+
+The [Flic Twist](https://flic.io/) is a smart button with a rotating dial - perfect for this use case. Here's how to configure it:
+
+**Flic Twist Actions:**
+
+| Gesture | Action | API Endpoint |
+|---------|--------|--------------|
+| Single tap | Toggle room on/off | `GET /api/Basement/toggle` |
+| Double tap | Cycle to next scene | `GET /api/Basement/cycle` |
+| Twist clockwise | Increase brightness | `GET /api/Basement/dimming_d1` (or d2, d3) |
+| Twist counter-clockwise | Decrease brightness | `GET /api/Basement/dimming_d4` (or d3, d2) |
+
+**How it works in practice:**
+
+1. **Room is off.** Single tap → room turns on with last active scene ("BasementOn" at 100%)
+2. **Too bright.** Twist counter-clockwise → brightness drops to 50% (d2 level)
+3. **Want movie mode.** Double tap → cycles to "MovieTime" scene, *still at 50% brightness*
+4. **Done watching.** Single tap → room turns off
+5. **Next day.** Single tap → room turns on with "MovieTime" at 50% (remembers both scene and dim level)
+
+**The key insight**: The room remembers:
+- Which scene was last active
+- What dim level was applied
+- Whether the room was on or off
+
+This gives you intuitive physical control without needing to think about which scene is active or what the brightness was.
+
+**Flic App Configuration:**
+
+In the Flic app, set up HTTP requests for each gesture:
+
+```
+Single Click:
+  URL: http://192.168.1.50:8000/api/Basement/toggle
+  Method: GET
+
+Double Click:
+  URL: http://192.168.1.50:8000/api/Basement/cycle
+  Method: GET
+
+Rotate Right (or use multiple positions):
+  URL: http://192.168.1.50:8000/api/Basement/dimming_d1
+  Method: GET
+
+Rotate Left:
+  URL: http://192.168.1.50:8000/api/Basement/dimming_d4
+  Method: GET
+```
+
+For the twist dial, you can map different rotation amounts to different dim levels (d1 = brightest, d4 = dimmest), or use the twist positions to directly set brightness.
+
 ## Network Requirements
 
 1. **Same network**: The computer/Raspberry Pi running KasaBasement must be on the same local network (subnet) as your Kasa bulbs
