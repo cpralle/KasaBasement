@@ -41,6 +41,11 @@ config.json
 # Pytest cache directories
 pytest-cache-files-*/
 
+# Local copies with personal info (untracked)
+*.local.md
+*.local.ps1
+*.local.sh
+
 # Temporary files
 *.tmp
 *.temp

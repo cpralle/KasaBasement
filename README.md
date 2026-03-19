@@ -48,10 +48,10 @@ Useful options:
 .\deploy_raspberry_pi.ps1 -SkipBuild
 
 # Override host/user/service/remote dir
-.\deploy_raspberry_pi.ps1 -PiHost KasaBasementPi.local -PiUser cpralle -RemoteDir ~/KasaBasement -ServiceName kasabasement
+.\deploy_raspberry_pi.ps1 -PiHost raspberrypi.local -PiUser pi -RemoteDir ~/KasaBasement -ServiceName kasabasement
 
 # Use a specific SSH private key (non-interactive)
-.\deploy_raspberry_pi.ps1 -PiHost 192.168.1.37 -PiUser cpralle -SshKeyPath "$env:USERPROFILE\secrets\kasabridge_deployKey"
+.\deploy_raspberry_pi.ps1 -PiHost 192.168.1.50 -PiUser pi -SshKeyPath "$env:USERPROFILE\.ssh\id_ed25519"
 ```
 
 ### Passwordless Deployment Setup (One-Time)
@@ -65,12 +65,12 @@ ssh-keygen -t ed25519 -C "kasabasement-deploy"
 
 2. Install public key on the Pi (one-time password prompt for this step):
 ```powershell
-Get-Content "$env:USERPROFILE\secrets\kasabridge_deployKey.pub" | ssh cpralle@192.168.1.37 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub" | ssh pi@192.168.1.50 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
 ```
 
 3. Verify key login works:
 ```powershell
-ssh -i "$env:USERPROFILE\secrets\kasabridge_deployKey" cpralle@192.168.1.37 "echo SSH key works"
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519" pi@192.168.1.50 "echo SSH key works"
 ```
 
 4. On the Pi, allow passwordless `systemctl` commands for deploy user:
@@ -79,7 +79,7 @@ sudo visudo -f /etc/sudoers.d/kasabasement-deploy
 ```
 Add:
 ```text
-cpralle ALL=(root) NOPASSWD: /bin/systemctl stop kasabasement, /bin/systemctl start kasabasement, /bin/systemctl status kasabasement, /bin/systemctl daemon-reload
+pi ALL=(root) NOPASSWD: /bin/systemctl stop kasabasement, /bin/systemctl start kasabasement, /bin/systemctl status kasabasement, /bin/systemctl daemon-reload
 ```
 Then validate:
 ```bash
@@ -89,7 +89,7 @@ sudo visudo -cf /etc/sudoers.d/kasabasement-deploy
 
 5. Deploy with key:
 ```powershell
-.\deploy_raspberry_pi.ps1 -PiHost 192.168.1.37 -PiUser cpralle -SshKeyPath "$env:USERPROFILE\secrets\kasabridge_deployKey"
+.\deploy_raspberry_pi.ps1 -PiHost 192.168.1.50 -PiUser pi -SshKeyPath "$env:USERPROFILE\.ssh\id_ed25519"
 ```
 
 ### Building Executables
@@ -165,7 +165,7 @@ This method uses Docker Desktop to build an ARM executable on your Windows PC, w
 
 2. **Navigate to your project directory:**
    ```powershell
-   cd "C:\Users\chadp\OneDrive\python onedrive stuff\KasaBasement"
+   cd "C:\path\to\KasaBasement"
    ```
 
 3. **Run the build script:**
@@ -199,12 +199,12 @@ This method uses Docker Desktop to build an ARM executable on your Windows PC, w
 
 6. **Transfer the executable to your Raspberry Pi:**
    ```powershell
-   scp dist/KasaBasementBridge cpralle@KasaBasementPi.local:~/KasaBasement/
+   scp dist/KasaBasementBridge pi@raspberrypi.local:~/KasaBasement/
    ```
 
 7. **On the Pi, make it executable and run:**
    ```bash
-   ssh cpralle@KasaBasementPi.local
+   ssh pi@raspberrypi.local
    cd ~/KasaBasement
    chmod +x KasaBasementBridge
    ./KasaBasementBridge

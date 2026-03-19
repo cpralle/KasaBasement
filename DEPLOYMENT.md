@@ -26,10 +26,10 @@ Common options:
 .\deploy_raspberry_pi.ps1 -DryRun
 
 # Custom target
-.\deploy_raspberry_pi.ps1 -PiHost KasaBasementPi.local -PiUser cpralle -RemoteDir ~/KasaBasement -ServiceName kasabasement
+.\deploy_raspberry_pi.ps1 -PiHost raspberrypi.local -PiUser pi -RemoteDir ~/KasaBasement -ServiceName kasabasement
 
 # Explicit SSH key (recommended for passwordless deploy)
-.\deploy_raspberry_pi.ps1 -PiHost 192.168.1.37 -PiUser cpralle -SshKeyPath "$env:USERPROFILE\secrets\kasabridge_deployKey"
+.\deploy_raspberry_pi.ps1 -PiHost 192.168.1.50 -PiUser pi -SshKeyPath "$env:USERPROFILE\.ssh\id_ed25519"
 ```
 
 The script performs:
@@ -42,7 +42,7 @@ The script performs:
 
 1. **Open PowerShell** and navigate to the project directory:
    ```powershell
-   cd "C:\Users\chadp\OneDrive\python onedrive stuff\KasaBasement"
+   cd "C:\path\to\KasaBasement"
    ```
    or
 
@@ -71,26 +71,26 @@ The script performs:
 
 1. **Stop the service** (if already running — the OS won't let you overwrite a running executable):
    ```powershell
-   ssh cpralle@KasaBasementPi.local "sudo systemctl stop kasabasement"
+   ssh pi@raspberrypi.local "sudo systemctl stop kasabasement"
    ```
 
 2. **Transfer the executable:**
    ```powershell
-   scp dist\KasaBasementBridge cpralle@KasaBasementPi.local:~/KasaBasement/
+   scp dist\KasaBasementBridge pi@raspberrypi.local:~/KasaBasement/
    ```
 
    Enter your Pi password when prompted.
 
 3. **Transfer the templates folder:**
    ```powershell
-   scp -r templates cpralle@KasaBasementPi.local:~/KasaBasement/
+   scp -r templates pi@raspberrypi.local:~/KasaBasement/
    ```
 
    This copies all HTML template files needed for the web interface. The application will look for templates in `~/KasaBasement/templates/` if they aren't bundled in the executable.
 
 4. **SSH into the Pi:**
    ```powershell
-   ssh cpralle@KasaBasementPi.local
+   ssh pi@raspberrypi.local
    ```
 
 5. **Make it executable and restart the service:**
@@ -118,15 +118,15 @@ The script performs:
 
    [Service]
    Type=simple
-   User=cpralle
-   WorkingDirectory=/home/cpralle/KasaBasement
-   ExecStart=/home/cpralle/KasaBasement/KasaBasementBridge
+   User=pi
+   WorkingDirectory=/home/pi/KasaBasement
+   ExecStart=/home/pi/KasaBasement/KasaBasementBridge
    Restart=on-failure
    RestartSec=2
    Environment=PYTHONUNBUFFERED=1
 
    # Optional: if you need environment variables (SCENE_TRIGGER_TOKEN, etc.)
-   # EnvironmentFile=-/home/cpralle/KasaBasement/.env
+   # EnvironmentFile=-/home/pi/KasaBasement/.env
 
    [Install]
    WantedBy=multi-user.target
@@ -155,7 +155,7 @@ If you need to set environment variables (like `SCENE_TRIGGER_TOKEN`):
 
 1. **Create .env file:**
    ```bash
-   nano /home/cpralle/KasaBasement/.env
+   nano /home/pi/KasaBasement/.env
    ```
 
 2. **Add your variables:**
@@ -173,12 +173,12 @@ If you need to set environment variables (like `SCENE_TRIGGER_TOKEN`):
    
    Change:
    ```ini
-   # EnvironmentFile=-/home/cpralle/KasaBasement/.env
+   # EnvironmentFile=-/home/pi/KasaBasement/.env
    ```
    
    To:
    ```ini
-   EnvironmentFile=-/home/cpralle/KasaBasement/.env
+   EnvironmentFile=-/home/pi/KasaBasement/.env
    ```
 
 4. **Reload and restart:**
@@ -284,7 +284,7 @@ If you see `jinja2.exceptions.TemplateNotFound: index.html` in the logs:
 2. **If missing, copy templates from Windows:**
    ```powershell
    # From Windows PowerShell
-   scp -r templates cpralle@KasaBasementPi.local:~/KasaBasement/
+   scp -r templates pi@raspberrypi.local:~/KasaBasement/
    ```
 
 3. **Verify all template files are present:**
@@ -344,16 +344,16 @@ If you get "Permission denied" when running the executable:
 
 ```powershell
 # On Windows - Build and deploy
-cd "C:\Users\chadp\OneDrive\python onedrive stuff\KasaBasement"
+cd "C:\path\to\KasaBasement"
 .\build_docker_desktop.ps1
-ssh cpralle@KasaBasementPi.local "sudo systemctl stop kasabasement"
-scp dist\KasaBasementBridge cpralle@KasaBasementPi.local:~/KasaBasement/
-scp -r templates cpralle@KasaBasementPi.local:~/KasaBasement/
+ssh pi@raspberrypi.local "sudo systemctl stop kasabasement"
+scp dist\KasaBasementBridge pi@raspberrypi.local:~/KasaBasement/
+scp -r templates pi@raspberrypi.local:~/KasaBasement/
 ```
 
 ```bash
 # On Pi - Make executable and start
-ssh cpralle@KasaBasementPi.local
+ssh pi@raspberrypi.local
 cd ~/KasaBasement
 chmod +x KasaBasementBridge
 sudo systemctl start kasabasement

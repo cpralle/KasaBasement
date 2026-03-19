@@ -113,7 +113,7 @@ if [ -f "dist/KasaBasementBridge" ]; then
     file dist/KasaBasementBridge
     echo ""
     echo "To transfer to Raspberry Pi:"
-    echo "  scp dist/KasaBasementBridge cpralle@KasaBasementPi.local:~/KasaBasement/"
+    echo "  scp dist/KasaBasementBridge pi@raspberrypi.local:~/KasaBasement/"
     echo ""
     echo "Or make it executable and test:"
     echo "  chmod +x dist/KasaBasementBridge"

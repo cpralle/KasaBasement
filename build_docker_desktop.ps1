@@ -173,7 +173,7 @@ if (Test-Path "dist/KasaBasementBridge") {
     Write-Host "File size: $([math]::Round($fileInfo.Length / 1MB, 2)) MB" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "To transfer to Raspberry Pi:" -ForegroundColor Yellow
-    Write-Host "  scp dist\KasaBasementBridge cpralle@KasaBasementPi.local:~/KasaBasement/" -ForegroundColor White
+    Write-Host "  scp dist\KasaBasementBridge pi@raspberrypi.local:~/KasaBasement/" -ForegroundColor White
     Write-Host ""
 } else {
     Write-Host ""

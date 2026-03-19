@@ -179,7 +179,7 @@ if [ -f "dist/KasaBasementBridge" ]; then
     file dist/KasaBasementBridge
     echo ""
     echo "To transfer to Raspberry Pi:"
-    echo "  scp dist/KasaBasementBridge cpralle@KasaBasementPi.local:~/"
+    echo "  scp dist/KasaBasementBridge pi@raspberrypi.local:~/"
 else
     echo ""
     echo "✗ Build failed!"

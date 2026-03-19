@@ -13,7 +13,7 @@ Builds and deploys KasaBasementBridge to a Raspberry Pi over SSH/SCP.
 .\deploy_raspberry_pi.ps1
 
 .EXAMPLE
-.\deploy_raspberry_pi.ps1 -PiHost KasaBasementPi.local -PiUser cpralle -DryRun
+.\deploy_raspberry_pi.ps1 -PiHost raspberrypi.local -PiUser pi -DryRun
 
 .EXAMPLE
 .\deploy_raspberry_pi.ps1 -SkipBuild -NoTemplateSync
@@ -21,8 +21,8 @@ Builds and deploys KasaBasementBridge to a Raspberry Pi over SSH/SCP.
 
 [CmdletBinding()]
 param(
-    [string]$PiHost = "KasaBasementPi.local",
-    [string]$PiUser = "cpralle",
+    [string]$PiHost = "raspberrypi.local",
+    [string]$PiUser = "pi",
     [string]$RemoteDir = "~/KasaBasement",
     [string]$ServiceName = "kasabasement",
     [string]$BuildScript = ".\build_docker_desktop.ps1",
