@@ -19,7 +19,140 @@ Other Kasa bulbs with color/color-temperature support should also work. The app 
 
 1. **Same network**: The computer/Raspberry Pi running KasaBasement must be on the same local network (subnet) as your Kasa bulbs
 2. **UDP broadcast**: Device discovery uses UDP broadcast on port 9999. Ensure your router/firewall allows this
-3. **Static IPs recommended**: For reliability, consider assigning static IPs to your bulbs via your router's DHCP settings
+3. **Static IP for host**: The device running KasaBasement should have a static IP so integrations (Home Assistant, physical buttons) can reliably reach it
+4. **Static IPs for bulbs**: For reliability, assign static IPs to your bulbs via your router's DHCP settings
+
+## Setting Up a Static IP for the Host Device
+
+The device running KasaBasement (your computer, Raspberry Pi, or server) needs a static IP address. Without one, your router may assign it a different IP after a reboot, breaking any external integrations.
+
+### Option 1: Router DHCP Reservation (Recommended)
+
+This is the easiest method - your router always assigns the same IP to a specific device.
+
+1. **Find your device's MAC address**:
+   - **Windows**: Open Command Prompt, run `ipconfig /all`, look for "Physical Address"
+   - **Linux/Raspberry Pi**: Run `ip link show` or `cat /sys/class/net/eth0/address`
+   - **Mac**: System Preferences > Network > Advanced > Hardware
+
+2. **Log into your router** (usually http://192.168.1.1 or http://192.168.0.1)
+
+3. **Find DHCP Reservation settings** (location varies by router):
+   - Look under LAN Settings, DHCP, or Address Reservation
+   - Common locations: Advanced > LAN > DHCP Server
+
+4. **Add a reservation**:
+   - Enter your device's MAC address
+   - Assign a static IP (e.g., `192.168.1.50`)
+   - Choose an IP outside your router's DHCP pool, or within the reserved range
+
+5. **Reboot your device** to pick up the new IP assignment
+
+### Option 2: Static IP on Raspberry Pi
+
+Configure the Pi itself to use a static IP.
+
+**Using NetworkManager (Raspberry Pi OS Bookworm and newer):**
+
+```bash
+# List connections
+nmcli con show
+
+# Set static IP for wired connection (replace "Wired connection 1" with your connection name)
+sudo nmcli con mod "Wired connection 1" ipv4.addresses 192.168.1.50/24
+sudo nmcli con mod "Wired connection 1" ipv4.gateway 192.168.1.1
+sudo nmcli con mod "Wired connection 1" ipv4.dns "8.8.8.8 8.8.4.4"
+sudo nmcli con mod "Wired connection 1" ipv4.method manual
+
+# Apply changes
+sudo nmcli con up "Wired connection 1"
+```
+
+**Using dhcpcd (older Raspberry Pi OS):**
+
+Edit `/etc/dhcpcd.conf`:
+
+```bash
+sudo nano /etc/dhcpcd.conf
+```
+
+Add at the end (adjust for your network):
+
+```
+# Static IP for eth0 (wired)
+interface eth0
+static ip_address=192.168.1.50/24
+static routers=192.168.1.1
+static domain_name_servers=8.8.8.8 8.8.4.4
+
+# Or for Wi-Fi (wlan0)
+interface wlan0
+static ip_address=192.168.1.50/24
+static routers=192.168.1.1
+static domain_name_servers=8.8.8.8 8.8.4.4
+```
+
+Then reboot:
+
+```bash
+sudo reboot
+```
+
+### Option 3: Static IP on Windows
+
+1. Open **Settings > Network & Internet > Ethernet** (or Wi-Fi)
+2. Click on your network connection
+3. Under "IP assignment", click **Edit**
+4. Change from "Automatic (DHCP)" to **Manual**
+5. Enable **IPv4** and enter:
+   - IP address: `192.168.1.50` (choose one not in use)
+   - Subnet mask: `255.255.255.0`
+   - Gateway: `192.168.1.1` (your router's IP)
+   - Preferred DNS: `8.8.8.8`
+6. Click **Save**
+
+### Option 4: Static IP on Linux (systemd-networkd)
+
+Create a network configuration file:
+
+```bash
+sudo nano /etc/systemd/network/10-static-eth0.network
+```
+
+Add:
+
+```ini
+[Match]
+Name=eth0
+
+[Network]
+Address=192.168.1.50/24
+Gateway=192.168.1.1
+DNS=8.8.8.8
+```
+
+Enable and restart:
+
+```bash
+sudo systemctl enable systemd-networkd
+sudo systemctl restart systemd-networkd
+```
+
+### Verifying Your Static IP
+
+After configuration, verify your IP:
+
+```bash
+# Windows
+ipconfig
+
+# Linux/Mac/Raspberry Pi
+ip addr show
+# or
+hostname -I
+```
+
+Your device should now always have the same IP address, making it reliable for integrations and bookmarks.
 
 ## Initial Bulb Setup
 
