@@ -15,6 +15,84 @@ Other Kasa bulbs with color/color-temperature support should also work. The app 
 
 **Note:** This app controls bulbs over your **local network** - it does not use TP-Link's cloud service. Your bulbs must be on the same network as the machine running KasaBasement.
 
+## Overview: How KasaBasement Works
+
+KasaBasement provides a web-based control center for your Kasa smart bulbs. Here's the core concept:
+
+### The Building Blocks
+
+1. **Devices** - Your individual smart bulbs, discovered automatically on your network
+2. **Scenes** - Saved lighting presets that set multiple bulbs to specific colors/brightness
+3. **Rooms** - Groups of devices with a visual grid layout representing their physical positions
+4. **Routines** - Scheduled automations that trigger scenes at specific times
+
+### Typical Workflow
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Devices   │ ──► │   Scenes    │ ──► │   Rooms     │
+│ (discover)  │     │ (create)    │     │ (organize)  │
+└─────────────┘     └─────────────┘     └─────────────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │  Routines   │
+                    │ (automate)  │
+                    └─────────────┘
+```
+
+### Example: Setting Up a Basement with 15 Bulbs
+
+**Step 1: Discover and add devices**
+- Open Settings, click "Rescan Network"
+- Select all 15 basement bulbs, click "Add Selected"
+
+**Step 2: Create scenes for different moods**
+- **"BasementOn"** - All bulbs at 100% warm white (2700K) for working
+- **"MovieTime"** - Dim ambient lighting, bulbs near TV at 5%, others off
+- **"Party"** - Colorful mix: some red, some blue, some purple at various brightness
+
+**Step 3: Create a room and map bulb positions**
+- Create room "Basement" with an 8x11 grid
+- Place each bulb on the grid matching their physical ceiling positions
+- Now the Map page shows a live visualization of your lights
+
+**Step 4: Set up routines**
+- **"Morning Reset"** at 04:30 - Activate "BasementOn" scene so lights are ready
+- **"Evening Dim"** at 22:00 - Switch to "MovieTime" automatically
+
+### Daily Usage Examples
+
+**Manual control via Dashboard:**
+- Click a scene card to activate it (all bulbs change instantly)
+- Click an active scene again to toggle the room off
+- Use per-device controls to fine-tune individual bulbs
+
+**Voice/button control via API:**
+```bash
+# "Hey Google, turn on basement lights" triggers:
+curl http://192.168.1.50:8000/api/trigger/scene/BasementOn
+
+# Physical button by the stairs triggers:
+curl http://192.168.1.50:8000/api/Basement/toggle
+```
+
+**Dimming for ambiance:**
+```bash
+# Reduce current scene to 25% brightness
+curl http://192.168.1.50:8000/api/Basement/dimming_d2
+```
+
+### The Map Visualization
+
+The Map page shows your room as a grid with colored tiles representing each bulb:
+- **Tile color** = bulb's current color
+- **Tile brightness** = bulb's current brightness (darker = dimmer)
+- **Yellow ring** = command in progress
+- **Red ring** = command failed
+
+This gives you a birds-eye view of your entire lighting setup, updating in real-time as scenes run.
+
 ## Network Requirements
 
 1. **Same network**: The computer/Raspberry Pi running KasaBasement must be on the same local network (subnet) as your Kasa bulbs
@@ -315,22 +393,140 @@ Scenes let you set multiple bulbs to specific colors/brightness with one click.
   - `aggressive`: Faster drop to low brightness (good for ambient lighting)
 - **Room Index**: Associate scene with a room for toggle/cycle behavior
 
-## Creating Rooms
+## Creating Rooms and Using the Map
 
-Rooms group devices for easier control and enable the room grid visualization.
+Rooms group devices for easier control and enable a visual grid representation of your physical light layout. The Map feature is one of the most powerful parts of KasaBasement - it lets you see and control your lights based on where they actually are in your space.
 
-### Via Web UI
+### Why Use Rooms?
 
-1. Go to the **Map** page
+- **Visual feedback**: See all your lights as a grid matching their ceiling/wall positions
+- **Real-time updates**: Watch colors change as scenes run
+- **Group control**: Toggle, cycle, and dim entire rooms with one command
+- **Scene association**: Link scenes to rooms for smart toggle behavior
+
+### Creating a Room
+
+1. Go to the **Map** page (link in the navigation bar)
 2. Click **Create Room**
-3. Enter the room name and grid dimensions (rows x columns)
-4. Drag devices to their positions on the grid
+3. Enter a room name (e.g., "Basement", "Living Room")
+4. The room is created with a default 8x8 grid
+
+### Mapping Your Lights to the Grid
+
+The grid represents a top-down view of your room. Each cell can hold one light.
+
+1. From the **Map** page, click on a room name to open the room editor
+2. You'll see an empty grid of cells
+3. **Click any cell** to open the tile editor
+4. Select a device from the dropdown
+5. Set the default action, brightness, and color for that position
+6. Click **Save**
+
+**Tips for mapping:**
+- Walk through your room and note where each bulb is physically located
+- Map bulbs to grid positions that match their real-world layout
+- Leave empty cells for areas without lights (walkways, furniture, etc.)
+- The grid doesn't have to be perfectly to scale - approximate positions work fine
+
+### Resizing the Grid
+
+If the default 8x8 grid doesn't fit your room:
+
+1. Open the room editor
+2. Find the "Grid size" controls in the top-right panel
+3. Enter new row and column counts (1-20 each)
+4. Click **Apply**
+
+The grid will resize, preserving existing device placements where possible.
+
+### Rearranging Lights
+
+You can drag and drop lights to new positions:
+
+1. **Drag** a tile with a light to an empty cell to move it
+2. **Drag** onto another light to swap positions
+3. Changes save automatically
+
+### Understanding the Live View
+
+The room map updates in real-time to show your lights' current state:
+
+| Visual | Meaning |
+|--------|---------|
+| Colored tile | Light is on, tile color = light color |
+| Dark/black tile | Light is off |
+| Bright tile | High brightness |
+| Dim tile | Low brightness |
+| Yellow ring | Command pending (waiting for confirmation) |
+| Red ring | Command failed |
+| Device label | Shows which bulb is in each position |
+
+### Render Mode Options
+
+The room editor has two render modes (top-right panel):
+
+- **Max brightness**: Shows colors at full saturation, ignoring brightness level. Good for seeing what color each light is set to.
+- **Current brightness**: Shows colors dimmed to match actual brightness. More realistic representation of what you see in person.
+
+### Data Source Options
+
+- **Live status**: Tiles update based on actual device state (polls the bulbs)
+- **Map config**: Shows the saved default colors from your grid configuration
 
 ### Room Features
 
-- **Toggle**: Turn all room lights on/off, remembering the last active scene
-- **Cycle**: Cycle through scenes associated with the room
-- **Dimming**: Apply brightness presets (d1-d4) to all room lights
+Once a room is set up, you get these controls:
+
+**Toggle** (`/api/{room}/toggle`)
+- If room is on: turns all lights off
+- If room is off: restores the last active scene
+- Remembers which scene was active, so toggling back on returns to the same look
+
+**Cycle** (`/api/{room}/cycle`)
+- Cycles through all scenes associated with this room
+- Great for a physical button: press to cycle through Movie → Party → Bright → Movie...
+
+**Dimming** (`/api/{room}/dimming_d1` through `d4`)
+- Applies brightness presets to the current scene
+- d1 = brightest, d4 = dimmest
+- Uses the scene's dim profile (linear or aggressive) for natural-feeling dimming
+
+### Associating Scenes with Rooms
+
+When you create or edit a scene, you can set its "Room Index":
+
+1. Go to **Scenes** page
+2. Edit a scene
+3. Set the **Room** dropdown to your room
+4. Save
+
+Now that scene:
+- Appears in room toggle/cycle rotation
+- Updates the room's "active scene" when triggered
+- Shows as active (green) on the dashboard when the room is on with that scene
+
+### Example: Complete Room Setup
+
+**Scenario**: Basement with 15 ceiling lights in a roughly 4x5 pattern
+
+1. **Create the room**:
+   - Map page → Create Room → "Basement"
+   - Resize to 5 rows × 6 columns (a bit of margin)
+
+2. **Map the lights**:
+   - Click cell (0,0) → select "Basement LED 01" → set white, 100% → Save
+   - Click cell (0,2) → select "Basement LED 02" → set white, 100% → Save
+   - Continue for all 15 bulbs, matching their ceiling positions
+
+3. **Create scenes**:
+   - "BasementOn": All bulbs warm white at 100%, Room = Basement
+   - "Dim": All bulbs warm white at 20%, Room = Basement
+   - "Movie": Back bulbs off, front bulbs at 5% warm, Room = Basement
+
+4. **Test it**:
+   - Dashboard: Click "BasementOn" → all lights turn on → map shows all white
+   - Dashboard: Click "BasementOn" again → room toggles off → map shows all dark
+   - API: `curl .../api/Basement/cycle` → cycles through your three scenes
 
 ## Creating Routines
 
